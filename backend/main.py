@@ -816,13 +816,40 @@ async def get_lecture(lecture_id: str):
     return result.data[0]
 
 
+# Supported transcription languages
+SUPPORTED_LANGUAGES = {
+    'en': 'English',
+    'it': 'Italian',
+    'de': 'German',
+    'es': 'Spanish',
+    'fr': 'French'
+}
+
+
+@app.get("/transcribe/languages")
+async def get_supported_languages():
+    """Get list of supported transcription languages"""
+    return {
+        'languages': [
+            {'code': code, 'name': name} 
+            for code, name in SUPPORTED_LANGUAGES.items()
+        ],
+        'default': 'en'
+    }
+
+
 @app.post("/transcribe")
 async def transcribe_lecture(
     audio: UploadFile = File(...),
     title: str = Form("Untitled Lecture"),
-    topic_id: str = Form(None)
+    topic_id: str = Form(None),
+    language: str = Form("en")
 ):
     """Transcribe audio using Groq's Whisper API (cloud-based)"""
+    
+    # Validate language
+    if language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(400, f"Unsupported language. Supported: {', '.join(SUPPORTED_LANGUAGES.keys())}")
     
     # Validate file type
     valid_extensions = ('.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm')
@@ -849,7 +876,7 @@ async def transcribe_lecture(
                 file=(audio.filename, audio_file.read()),
                 model="whisper-large-v3",
                 response_format="verbose_json",  # Get segments for duration
-                language="en"
+                language=language
             )
         
         raw_transcript = transcription.text
@@ -890,6 +917,8 @@ async def transcribe_lecture(
             'raw_length': len(raw_transcript),
             'cleaned_length': len(cleaned_transcript),
             'cleaned_preview': cleaned_transcript[:500],
+            'language': language,
+            'language_name': SUPPORTED_LANGUAGES[language],
             'status': 'success'
         }
         

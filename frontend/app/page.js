@@ -9,9 +9,18 @@ import { useAuth, getApiUrl } from './context/AuthContext';
 
 const API_URL = getApiUrl();
 
+// Supported languages for transcription
+const LANGUAGES = [
+  { code: 'en', name: 'English' },
+  { code: 'it', name: 'Italian' },
+  { code: 'de', name: 'German' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+];
+
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, loading: authLoading, authFetch } = useAuth();
+  const { isAuthenticated, loading: authLoading, authFetch, currentClass } = useAuth();
   
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
@@ -24,6 +33,7 @@ export default function Home() {
   const [topics, setTopics] = useState([]);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [language, setLanguage] = useState('en');
 
   useEffect(() => {
     // Redirect to login if not authenticated
@@ -31,10 +41,30 @@ export default function Home() {
       router.push('/login');
       return;
     }
-    if (isAuthenticated) {
+    
+    // Redirect to classes if no class selected
+    if (!authLoading && isAuthenticated && !currentClass) {
+      router.push('/classes');
+      return;
+    }
+    
+    // Fetch subjects for current class
+    if (isAuthenticated && currentClass) {
       fetchSubjects();
     }
-  }, [isAuthenticated, authLoading]);
+    
+    // Load last used language from localStorage
+    const savedLanguage = localStorage.getItem('transcription_language');
+    if (savedLanguage && LANGUAGES.some(l => l.code === savedLanguage)) {
+      setLanguage(savedLanguage);
+    }
+  }, [isAuthenticated, authLoading, currentClass]);
+
+  // Save language preference when it changes
+  const handleLanguageChange = (newLanguage) => {
+    setLanguage(newLanguage);
+    localStorage.setItem('transcription_language', newLanguage);
+  };
 
   // Show loading while checking auth
   if (authLoading) {
@@ -47,14 +77,15 @@ export default function Home() {
     );
   }
 
-  // Don't render if not authenticated (will redirect)
-  if (!isAuthenticated) {
+  // Don't render if not authenticated or no class (will redirect)
+  if (!isAuthenticated || !currentClass) {
     return null;
   }
 
   const fetchSubjects = async () => {
     try {
-      const response = await authFetch(`${API_URL}/subjects`);
+      // Fetch subjects for current class only
+      const response = await authFetch(`${API_URL}/classes/${currentClass.id}/subjects`);
       const data = await response.json();
       setSubjects(data);
     } catch (err) {
@@ -110,6 +141,7 @@ export default function Home() {
     const formData = new FormData();
     formData.append('audio', file);
     formData.append('title', title || 'Untitled Lecture');
+    formData.append('language', language);
 
     try {
       const response = await authFetch(`${API_URL}/transcribe`, {
@@ -160,7 +192,7 @@ export default function Home() {
       }
 
       const data = await response.json();
-      alert(`✅ PDF uploaded! Extracted ${data.pages} pages.`);
+      alert(`PDF uploaded! Extracted ${data.pages} pages.`);
       setPdfFile(null);
       
     } catch (err) {
@@ -173,15 +205,22 @@ export default function Home() {
   return (
     <div style={styles.container}>
       <div style={styles.content}>
-        <h1 style={styles.title}>ðŸŽ“ Lecture Transcription MVP</h1>
-        <p style={styles.subtitle}>Free transcription with Whisper + Groq</p>
+        <h1 style={styles.title}>Lecture Transcription</h1>
+        <p style={styles.subtitle}>
+          Class: <strong>{currentClass.name}</strong>
+        </p>
 
-        <Link href="/subjects" style={styles.viewSubjectsLink}>
-          ðŸ“ Browse Subjects
-        </Link>
-        <Link href="/lectures" style={styles.viewLecturesLink}>
-          ðŸ“š View All Lectures
-        </Link>
+        <div style={styles.navLinks}>
+          <Link href="/classes" style={styles.navLink}>
+            Switch Class
+          </Link>
+          <Link href="/subjects" style={styles.navLink}>
+            Browse Subjects
+          </Link>
+          <Link href="/lectures" style={styles.navLink}>
+            View All Lectures
+          </Link>
+        </div>
         
         <div style={styles.card}>
           <label style={styles.label}>Lecture Title</label>
@@ -204,7 +243,7 @@ export default function Home() {
               <option value="">-- No Subject --</option>
               {subjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
-                  ðŸ“ {subject.name}
+                  {subject.name}
                 </option>
               ))}
             </select>
@@ -218,15 +257,15 @@ export default function Home() {
                 <option value="">-- No Topic --</option>
                 {topics.map((topic) => (
                   <option key={topic.id} value={topic.id}>
-                    ðŸ“‚ {topic.name}
+                    {topic.name}
                   </option>
                 ))}
               </select>
             )}
 
-            {!selectedSubject && subjects.length === 0 && (
+            {subjects.length === 0 && (
               <Link href="/subjects" style={styles.createSubjectLink}>
-                âž• Create Subject/Topic
+                + Create Subject/Topic
               </Link>
             )}
           </div>
@@ -241,9 +280,25 @@ export default function Home() {
           
           {file && (
             <p style={styles.fileInfo}>
-              ðŸ“Ž {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+              Selected: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           )}
+
+          <label style={styles.label}>Audio Language</label>
+          <select
+            value={language}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+            style={styles.select}
+          >
+            {LANGUAGES.map((lang) => (
+              <option key={lang.code} value={lang.code}>
+                {lang.name}
+              </option>
+            ))}
+          </select>
+          <p style={styles.languageHint}>
+            Select the language spoken in the audio. Your choice will be remembered.
+          </p>
 
           <label style={styles.label}>Course Material (PDF) - Optional</label>
           <input
@@ -255,7 +310,7 @@ export default function Home() {
           
           {pdfFile && (
             <p style={styles.fileInfo}>
-              ðŸ“„ {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
+              PDF: {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           )}
 
@@ -267,23 +322,23 @@ export default function Home() {
               ...(loading || !file ? styles.buttonDisabled : {})
             }}
           >
-            {loading ? 'â³ Transcribing...' : 'ðŸš€ Upload & Transcribe'}
+            {loading ? 'Transcribing...' : 'Upload & Transcribe'}
           </button>
           
           {loading && (
             <p style={styles.loadingText}>
-              â±ï¸ This may take a few minutes for longer recordings...
+              This may take a few minutes for longer recordings...
             </p>
           )}
         </div>
 
         {error && (
-          <div style={styles.error}>âŒ {error}</div>
+          <div style={styles.error}>{error}</div>
         )}
 
         {result && (
           <div style={styles.results}>
-            <h2 style={styles.resultsTitle}>âœ… Transcription Complete!</h2>
+            <h2 style={styles.resultsTitle}>Transcription Complete!</h2>
             
             <div style={styles.resultCard}>
               <strong>Lecture ID:</strong>
@@ -292,12 +347,14 @@ export default function Home() {
 
             {selectedTopic && (
               <div style={styles.resultCard}>
-                <strong>âœ… Organized:</strong> Lecture assigned to selected topic
+                <strong>Organized:</strong> Lecture assigned to selected topic
               </div>
             )}
 
             <div style={styles.resultCard}>
               <strong>Duration:</strong> {result.duration_seconds}s
+              <br />
+              <strong>Language:</strong> {result.language_name || 'English'}
               <br />
               <strong>Raw transcript:</strong> {result.raw_length} characters
               <br />
@@ -305,13 +362,13 @@ export default function Home() {
             </div>
 
             <div style={styles.resultCard}>
-              <h3 style={styles.previewTitle}>ðŸ“ Cleaned Transcript Preview:</h3>
+              <h3 style={styles.previewTitle}>Cleaned Transcript Preview:</h3>
               <p style={styles.transcript}>{result.cleaned_preview}</p>
             </div>
 
             {pdfFile && !uploadingPdf && (
               <div style={styles.resultCard}>
-                <h3 style={styles.previewTitle}>ðŸ“„ Upload Course Material</h3>
+                <h3 style={styles.previewTitle}>Upload Course Material</h3>
                 <p style={{marginBottom: '10px'}}>
                   Ready to upload: {pdfFile.name}
                 </p>
@@ -319,16 +376,22 @@ export default function Home() {
                   onClick={handlePdfUpload}
                   style={styles.pdfUploadButton}
                 >
-                  ðŸ“¤ Upload PDF to This Lecture
+                  Upload PDF to This Lecture
                 </button>
               </div>
             )}
 
             {uploadingPdf && (
               <div style={styles.resultCard}>
-                <p style={styles.loadingText}>â³ Uploading and extracting PDF text...</p>
+                <p style={styles.loadingText}>Uploading and extracting PDF text...</p>
               </div>
             )}
+
+            <div style={styles.resultCard}>
+              <Link href={`/lectures/${result.lecture_id}`} style={styles.viewLectureLink}>
+                View Full Lecture
+              </Link>
+            </div>
           </div>
         )}
       </div>
@@ -354,7 +417,22 @@ const styles = {
   subtitle: {
     fontSize: '16px',
     color: '#666',
-    marginBottom: '30px',
+    marginBottom: '20px',
+  },
+  navLinks: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+  },
+  navLink: {
+    display: 'inline-block',
+    padding: '10px 20px',
+    backgroundColor: '#28a745',
+    color: 'white',
+    textDecoration: 'none',
+    borderRadius: '4px',
+    fontWeight: '600',
   },
   card: {
     backgroundColor: 'white',
@@ -375,6 +453,7 @@ const styles = {
     border: '1px solid #ddd',
     borderRadius: '4px',
     fontSize: '14px',
+    boxSizing: 'border-box',
   },
   organizeSection: {
     display: 'flex',
@@ -389,10 +468,16 @@ const styles = {
     fontSize: '14px',
     backgroundColor: 'white',
   },
+  languageHint: {
+    fontSize: '12px',
+    color: '#888',
+    marginTop: '4px',
+    marginBottom: '0',
+  },
   createSubjectLink: {
     display: 'inline-block',
     padding: '8px 16px',
-    backgroundColor: '#28a745',
+    backgroundColor: '#17a2b8',
     color: 'white',
     textDecoration: 'none',
     borderRadius: '4px',
@@ -468,27 +553,6 @@ const styles = {
     lineHeight: '1.6',
     color: '#333',
   },
-  viewSubjectsLink: {
-    display: 'inline-block',
-    padding: '10px 20px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    textDecoration: 'none',
-    borderRadius: '4px',
-    marginBottom: '20px',
-    marginRight: '10px',
-    fontWeight: '600',
-  },
-  viewLecturesLink: {
-    display: 'inline-block',
-    padding: '10px 20px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    textDecoration: 'none',
-    borderRadius: '4px',
-    marginBottom: '20px',
-    fontWeight: '600',
-  },
   pdfUploadButton: {
     padding: '12px 24px',
     backgroundColor: '#28a745',
@@ -498,5 +562,14 @@ const styles = {
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
+  },
+  viewLectureLink: {
+    display: 'inline-block',
+    padding: '12px 24px',
+    backgroundColor: '#0066cc',
+    color: 'white',
+    textDecoration: 'none',
+    borderRadius: '4px',
+    fontWeight: '600',
   },
 };
