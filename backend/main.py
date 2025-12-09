@@ -32,15 +32,17 @@ supabase: Client = create_client(
 # CORS for frontend - add your Vercel URL when deployed
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    # Add your Vercel URL here after deployment, e.g.:
-    # "https://your-app-name.vercel.app",
+    "https://lecture-lessons.vercel.app",  # UPDATE to your actual Vercel URL if different
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Allow Vercel preview deployments
+    allow_origin_regex=r"https://.*\.vercel\.app",
 )
 
 # ============================================
@@ -102,7 +104,7 @@ def analyze_response_content(content: str) -> dict:
     """Analyze a response to extract learning style indicators (NO AI needed!)"""
     
     # Check for bullet points
-    has_bullet_points = bool(re.search(r'^[\s]*[-â€¢*]', content, re.MULTILINE))
+    has_bullet_points = bool(re.search(r'^[\s]*[-Ã¢â‚¬Â¢*]', content, re.MULTILINE))
     
     # Check for numbered steps
     has_numbered_steps = bool(re.search(r'^[\s]*\d+[.)]', content, re.MULTILINE))
@@ -332,7 +334,7 @@ async def maybe_analyze_and_update_profile(user_id: str):
         .eq('user_id', user_id)\
         .execute()
     
-    print(f"âœ¨ Updated learning profile for user {user_id[:8]}... ({len(liked_result.data)} likes processed)")
+    print(f"Ã¢Å“Â¨ Updated learning profile for user {user_id[:8]}... ({len(liked_result.data)} likes processed)")
 
 
 # ============================================

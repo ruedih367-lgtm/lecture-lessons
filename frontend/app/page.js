@@ -4,11 +4,15 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getApiUrl } from './context/AuthContext';
+import { useRouter } from 'next/navigation';
+import { useAuth, getApiUrl } from './context/AuthContext';
 
 const API_URL = getApiUrl();
 
 export default function Home() {
+  const router = useRouter();
+  const { isAuthenticated, loading: authLoading, authFetch } = useAuth();
+  
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,12 +26,35 @@ export default function Home() {
   const [selectedTopic, setSelectedTopic] = useState('');
 
   useEffect(() => {
-    fetchSubjects();
-  }, []);
+    // Redirect to login if not authenticated
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    if (isAuthenticated) {
+      fetchSubjects();
+    }
+  }, [isAuthenticated, authLoading]);
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.content}>
+          <p style={{ textAlign: 'center', padding: '100px 20px' }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
 
   const fetchSubjects = async () => {
     try {
-      const response = await fetch(`${API_URL}/subjects`);
+      const response = await authFetch(`${API_URL}/subjects`);
       const data = await response.json();
       setSubjects(data);
     } catch (err) {
@@ -37,7 +64,7 @@ export default function Home() {
 
   const fetchTopicsForSubject = async (subjectId) => {
     try {
-      const response = await fetch(`${API_URL}/subjects/${subjectId}/topics`);
+      const response = await authFetch(`${API_URL}/subjects/${subjectId}/topics`);
       const data = await response.json();
       setTopics(data);
     } catch (err) {
@@ -61,7 +88,7 @@ export default function Home() {
     formData.append('topic_id', topicId);
 
     try {
-      await fetch(`${API_URL}/lectures/${lectureId}/topic`, {
+      await authFetch(`${API_URL}/lectures/${lectureId}/topic`, {
         method: 'PUT',
         body: formData,
       });
@@ -85,7 +112,7 @@ export default function Home() {
     formData.append('title', title || 'Untitled Lecture');
 
     try {
-      const response = await fetch(`${API_URL}/transcribe`, {
+      const response = await authFetch(`${API_URL}/transcribe`, {
         method: 'POST',
         body: formData,
       });
@@ -123,7 +150,7 @@ export default function Home() {
     formData.append('pdf', pdfFile);
 
     try {
-      const response = await fetch(`${API_URL}/lectures/${result.lecture_id}/upload-pdf`, {
+      const response = await authFetch(`${API_URL}/lectures/${result.lecture_id}/upload-pdf`, {
         method: 'POST',
         body: formData,
       });
@@ -146,14 +173,14 @@ export default function Home() {
   return (
     <div style={styles.container}>
       <div style={styles.content}>
-        <h1 style={styles.title}>🎓 Lecture Transcription MVP</h1>
+        <h1 style={styles.title}>ðŸŽ“ Lecture Transcription MVP</h1>
         <p style={styles.subtitle}>Free transcription with Whisper + Groq</p>
 
         <Link href="/subjects" style={styles.viewSubjectsLink}>
-          📁 Browse Subjects
+          ðŸ“ Browse Subjects
         </Link>
         <Link href="/lectures" style={styles.viewLecturesLink}>
-          📚 View All Lectures
+          ðŸ“š View All Lectures
         </Link>
         
         <div style={styles.card}>
@@ -177,7 +204,7 @@ export default function Home() {
               <option value="">-- No Subject --</option>
               {subjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
-                  📁 {subject.name}
+                  ðŸ“ {subject.name}
                 </option>
               ))}
             </select>
@@ -191,7 +218,7 @@ export default function Home() {
                 <option value="">-- No Topic --</option>
                 {topics.map((topic) => (
                   <option key={topic.id} value={topic.id}>
-                    📂 {topic.name}
+                    ðŸ“‚ {topic.name}
                   </option>
                 ))}
               </select>
@@ -199,7 +226,7 @@ export default function Home() {
 
             {!selectedSubject && subjects.length === 0 && (
               <Link href="/subjects" style={styles.createSubjectLink}>
-                ➕ Create Subject/Topic
+                âž• Create Subject/Topic
               </Link>
             )}
           </div>
@@ -214,7 +241,7 @@ export default function Home() {
           
           {file && (
             <p style={styles.fileInfo}>
-              📎 {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+              ðŸ“Ž {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           )}
 
@@ -228,7 +255,7 @@ export default function Home() {
           
           {pdfFile && (
             <p style={styles.fileInfo}>
-              📄 {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
+              ðŸ“„ {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           )}
 
@@ -240,23 +267,23 @@ export default function Home() {
               ...(loading || !file ? styles.buttonDisabled : {})
             }}
           >
-            {loading ? '⏳ Transcribing...' : '🚀 Upload & Transcribe'}
+            {loading ? 'â³ Transcribing...' : 'ðŸš€ Upload & Transcribe'}
           </button>
           
           {loading && (
             <p style={styles.loadingText}>
-              ⏱️ This may take a few minutes for longer recordings...
+              â±ï¸ This may take a few minutes for longer recordings...
             </p>
           )}
         </div>
 
         {error && (
-          <div style={styles.error}>❌ {error}</div>
+          <div style={styles.error}>âŒ {error}</div>
         )}
 
         {result && (
           <div style={styles.results}>
-            <h2 style={styles.resultsTitle}>✅ Transcription Complete!</h2>
+            <h2 style={styles.resultsTitle}>âœ… Transcription Complete!</h2>
             
             <div style={styles.resultCard}>
               <strong>Lecture ID:</strong>
@@ -265,7 +292,7 @@ export default function Home() {
 
             {selectedTopic && (
               <div style={styles.resultCard}>
-                <strong>✅ Organized:</strong> Lecture assigned to selected topic
+                <strong>âœ… Organized:</strong> Lecture assigned to selected topic
               </div>
             )}
 
@@ -278,13 +305,13 @@ export default function Home() {
             </div>
 
             <div style={styles.resultCard}>
-              <h3 style={styles.previewTitle}>📝 Cleaned Transcript Preview:</h3>
+              <h3 style={styles.previewTitle}>ðŸ“ Cleaned Transcript Preview:</h3>
               <p style={styles.transcript}>{result.cleaned_preview}</p>
             </div>
 
             {pdfFile && !uploadingPdf && (
               <div style={styles.resultCard}>
-                <h3 style={styles.previewTitle}>📄 Upload Course Material</h3>
+                <h3 style={styles.previewTitle}>ðŸ“„ Upload Course Material</h3>
                 <p style={{marginBottom: '10px'}}>
                   Ready to upload: {pdfFile.name}
                 </p>
@@ -292,14 +319,14 @@ export default function Home() {
                   onClick={handlePdfUpload}
                   style={styles.pdfUploadButton}
                 >
-                  📤 Upload PDF to This Lecture
+                  ðŸ“¤ Upload PDF to This Lecture
                 </button>
               </div>
             )}
 
             {uploadingPdf && (
               <div style={styles.resultCard}>
-                <p style={styles.loadingText}>⏳ Uploading and extracting PDF text...</p>
+                <p style={styles.loadingText}>â³ Uploading and extracting PDF text...</p>
               </div>
             )}
           </div>
