@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.next/
+__pycache__/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build files
+*.pyc
+.vercel
+
+# FFmpeg (not needed for cloud deployment)
+*.exe
+ffmpeg.exe
+ffprobe.exe
+ffplay.exe
