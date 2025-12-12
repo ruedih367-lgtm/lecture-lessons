@@ -4,7 +4,11 @@
 
 import { createContext, useContext, useState, useEffect } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Use environment variable, fallback to production URL, then localhost for dev
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000' 
+    : 'https://lecture-lessons.onrender.com');
 
 const AuthContext = createContext(null);
 
@@ -108,7 +112,19 @@ export function AuthProvider({ children }) {
       ...getAuthHeader()
     };
     
-    return fetch(url, { ...options, headers });
+    const response = await fetch(url, { ...options, headers });
+    
+    // If we get a 401, the token is expired - logout the user
+    if (response.status === 401) {
+      console.warn('Token expired, logging out...');
+      logout();
+      // Redirect to login page
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+    }
+    
+    return response;
   };
 
   return (
@@ -139,4 +155,7 @@ export function useAuth() {
 }
 
 // Export API_URL for use in non-authenticated requests
-export const getApiUrl = () => process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const getApiUrl = () => process.env.NEXT_PUBLIC_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000' 
+    : 'https://lecture-lessons.onrender.com');

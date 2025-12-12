@@ -86,18 +86,45 @@ export default function Home() {
     try {
       // Fetch subjects for current class only
       const response = await authFetch(`${API_URL}/classes/${currentClass.id}/subjects`);
+      
+      // Handle auth errors
+      if (response.status === 401) {
+        // Token expired, redirect to login
+        router.push('/login');
+        return;
+      }
+      
+      if (!response.ok) {
+        console.error('Failed to fetch subjects:', response.status);
+        setSubjects([]);
+        return;
+      }
+      
       const data = await response.json();
-      setSubjects(data);
+      // Make sure data is an array before setting
+      setSubjects(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error fetching subjects:', err);
+      setSubjects([]);
     }
   };
 
   const fetchTopicsForSubject = async (subjectId) => {
     try {
       const response = await authFetch(`${API_URL}/subjects/${subjectId}/topics`);
+      
+      if (response.status === 401) {
+        router.push('/login');
+        return;
+      }
+      
+      if (!response.ok) {
+        setTopics([]);
+        return;
+      }
+      
       const data = await response.json();
-      setTopics(data);
+      setTopics(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error fetching topics:', err);
       setTopics([]);
