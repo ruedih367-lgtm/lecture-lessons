@@ -75,13 +75,13 @@ export default function LecturePage() {
       }
 
       const data = await response.json();
-      alert(`✅ PDF uploaded! Extracted ${data.pages} pages with ${data.extracted_length} characters.`);
+      alert(`PDF uploaded! Extracted ${data.pages} pages.`);
       
       fetchMaterials();
       setPdfFile(null);
       
     } catch (err) {
-      alert(`❌ Upload failed: ${err.message}`);
+      alert(`Upload failed: ${err.message}`);
     } finally {
       setUploadingPdf(false);
     }
@@ -89,7 +89,7 @@ export default function LecturePage() {
 
   // DELETE LECTURE FUNCTION
   const handleDeleteLecture = async () => {
-    const confirmMsg = `⚠️ DELETE LECTURE?\n\nThis will permanently delete:\n• "${lecture.title}"\n• All uploaded materials (${materials.length} files)\n\nThis cannot be undone!`;
+    const confirmMsg = `DELETE LECTURE?\n\nThis will permanently delete:\n- "${lecture.title}"\n- All uploaded materials (${materials.length} files)\n\nThis cannot be undone!`;
     
     if (!confirm(confirmMsg)) return;
 
@@ -104,11 +104,11 @@ export default function LecturePage() {
         throw new Error('Failed to delete lecture');
       }
 
-      alert('✅ Lecture deleted successfully!');
+      alert('Lecture deleted successfully!');
       router.push('/lectures');
       
     } catch (err) {
-      alert(`❌ Delete failed: ${err.message}`);
+      alert(`Delete failed: ${err.message}`);
       setDeleting(false);
     }
   };
@@ -144,9 +144,9 @@ export default function LecturePage() {
     return (
       <div style={styles.container}>
         <div style={styles.content}>
-          <div style={styles.error}>❌ {error || 'Lecture not found'}</div>
+          <div style={styles.error}>{error || 'Lecture not found'}</div>
           <Link href="/lectures" style={styles.backLink}>
-            ← Back to Lectures
+            Back to Lectures
           </Link>
         </div>
       </div>
@@ -159,7 +159,7 @@ export default function LecturePage() {
         {/* Header */}
         <div style={styles.header}>
           <Link href="/lectures" style={styles.backLink}>
-            ← All Lectures
+            All Lectures
           </Link>
         </div>
 
@@ -169,22 +169,38 @@ export default function LecturePage() {
           
           <div style={styles.metadata}>
             <span style={styles.metaItem}>
-              ⏱️ Duration: {formatDuration(lecture.audio_duration_seconds)}
+              Duration: {formatDuration(lecture.audio_duration_seconds)}
             </span>
             <span style={styles.metaItem}>
-              📅 {formatDate(lecture.created_at)}
+              {formatDate(lecture.created_at)}
             </span>
             <span style={styles.metaItem}>
-              📝 {lecture.cleaned_transcript?.length || 0} characters
+              {lecture.cleaned_transcript?.length || 0} characters
             </span>
           </div>
 
-          <div style={styles.buttonRow}>
+          {/* ACTIONS MOVED HERE - at the top */}
+          <div style={styles.actions}>
+            <Link href={`/lectures/${lectureId}/study`} style={styles.studyButton}>
+              AI Study Assistant
+            </Link>
+            
+            <button
+              onClick={() => {
+                const text = showRaw ? lecture.raw_transcript : lecture.cleaned_transcript;
+                navigator.clipboard.writeText(text);
+                alert('Transcript copied to clipboard!');
+              }}
+              style={styles.actionButton}
+            >
+              Copy Transcript
+            </button>
+
             <button
               onClick={() => setShowRaw(!showRaw)}
               style={styles.toggleButton}
             >
-              {showRaw ? '✨ Show Cleaned Version' : '📝 Show Raw Transcript'}
+              {showRaw ? 'Show Cleaned Version' : 'Show Raw Transcript'}
             </button>
 
             {/* DELETE BUTTON */}
@@ -196,14 +212,14 @@ export default function LecturePage() {
                 ...(deleting ? styles.deleteButtonDisabled : {})
               }}
             >
-              {deleting ? '⏳ Deleting...' : '🗑️ Delete Lecture'}
+              {deleting ? 'Deleting...' : 'Delete Lecture'}
             </button>
           </div>
         </div>
 
         {/* Materials Section */}
         <div style={styles.materialsCard}>
-          <h2 style={styles.sectionTitle}>📚 Course Materials</h2>
+          <h2 style={styles.sectionTitle}>Course Materials</h2>
           
           {/* Upload PDF */}
           <div style={styles.uploadSection}>
@@ -228,7 +244,7 @@ export default function LecturePage() {
                 ...((!pdfFile || uploadingPdf) && styles.uploadButtonDisabled)
               }}
             >
-              {uploadingPdf ? '⏳ Uploading...' : '📤 Upload PDF'}
+              {uploadingPdf ? 'Uploading...' : 'Upload PDF'}
             </button>
           </div>
 
@@ -238,7 +254,6 @@ export default function LecturePage() {
               <h3 style={styles.materialsListTitle}>Uploaded Materials:</h3>
               {materials.map((material) => (
                 <div key={material.id} style={styles.materialItem}>
-                  <span style={styles.materialIcon}>📄</span>
                   <span style={styles.materialName}>{material.file_name}</span>
                   <span style={styles.materialDate}>
                     {new Date(material.created_at).toLocaleDateString()}
@@ -256,30 +271,12 @@ export default function LecturePage() {
         {/* Transcript Display */}
         <div style={styles.transcriptCard}>
           <h2 style={styles.transcriptTitle}>
-            {showRaw ? '📝 Raw Transcript' : '✨ Cleaned Transcript'}
+            {showRaw ? 'Raw Transcript' : 'Cleaned Transcript'}
           </h2>
           
           <div style={styles.transcript}>
             {showRaw ? lecture.raw_transcript : lecture.cleaned_transcript}
           </div>
-        </div>
-
-        {/* Actions */}
-        <div style={styles.actions}>
-          <Link href={`/lectures/${lectureId}/study`} style={styles.studyButton}>
-            🤖 AI Study Assistant
-          </Link>
-          
-          <button
-            onClick={() => {
-              const text = showRaw ? lecture.raw_transcript : lecture.cleaned_transcript;
-              navigator.clipboard.writeText(text);
-              alert('Transcript copied to clipboard!');
-            }}
-            style={styles.actionButton}
-          >
-            📋 Copy Transcript
-          </button>
         </div>
       </div>
     </div>
@@ -344,13 +341,33 @@ const styles = {
     fontSize: '14px',
     color: '#666',
   },
-  buttonRow: {
+  actions: {
     display: 'flex',
     gap: '10px',
     flexWrap: 'wrap',
   },
+  studyButton: {
+    display: 'inline-block',
+    padding: '12px 24px',
+    backgroundColor: '#28a745',
+    color: 'white',
+    textDecoration: 'none',
+    borderRadius: '4px',
+    fontSize: '14px',
+    fontWeight: '600',
+  },
+  actionButton: {
+    padding: '12px 24px',
+    backgroundColor: '#0066cc',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+  },
   toggleButton: {
-    padding: '10px 20px',
+    padding: '12px 24px',
     backgroundColor: '#f0f0f0',
     border: '1px solid #ddd',
     borderRadius: '4px',
@@ -359,7 +376,7 @@ const styles = {
     fontWeight: '600',
   },
   deleteButton: {
-    padding: '10px 20px',
+    padding: '12px 24px',
     backgroundColor: '#dc3545',
     color: 'white',
     border: 'none',
@@ -391,30 +408,6 @@ const styles = {
     color: '#333',
     whiteSpace: 'pre-wrap',
     wordWrap: 'break-word',
-  },
-  actions: {
-    display: 'flex',
-    gap: '10px',
-  },
-  studyButton: {
-    display: 'inline-block',
-    padding: '12px 24px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    textDecoration: 'none',
-    borderRadius: '4px',
-    fontSize: '14px',
-    fontWeight: '600',
-  },
-  actionButton: {
-    padding: '12px 24px',
-    backgroundColor: '#0066cc',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600',
   },
   materialsCard: {
     backgroundColor: 'white',
@@ -474,9 +467,6 @@ const styles = {
     backgroundColor: '#f9f9f9',
     borderRadius: '4px',
     marginBottom: '10px',
-  },
-  materialIcon: {
-    fontSize: '20px',
   },
   materialName: {
     flex: 1,
