@@ -32,17 +32,15 @@ supabase: Client = create_client(
 # CORS for frontend - add your Vercel URL when deployed
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "https://lecture-lessons.vercel.app",  # UPDATE to your actual Vercel URL if different
+    # Add your Vercel URL here after deployment, e.g.:
+    # "https://your-app-name.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    # Allow Vercel preview deployments
-    allow_origin_regex=r"https://.*\.vercel\.app",
 )
 
 # ============================================
@@ -711,6 +709,36 @@ async def list_class_subjects(class_id: str, user_id: str = Depends(require_auth
     return subjects
 
 
+@app.get("/classes/{class_id}/lectures")
+async def list_class_lectures(class_id: str, user_id: str = Depends(require_auth)):
+    """List all lectures in a class (through subjects -> topics -> lectures)"""
+    if not await check_class_membership(user_id, class_id):
+        raise HTTPException(403, "Not a member of this class")
+    
+    # Get all subjects for this class
+    subjects = supabase.table('subjects').select('id').eq('class_id', class_id).execute()
+    if not subjects.data:
+        return []
+    
+    subject_ids = [s['id'] for s in subjects.data]
+    
+    # Get all topics for these subjects
+    topics = supabase.table('topics').select('id').in_('subject_id', subject_ids).execute()
+    if not topics.data:
+        return []
+    
+    topic_ids = [t['id'] for t in topics.data]
+    
+    # Get all lectures for these topics
+    lectures = supabase.table('lectures')\
+        .select('id, title, recording_date, audio_duration_seconds, created_at, topic_id')\
+        .in_('topic_id', topic_ids)\
+        .order('created_at', desc=True)\
+        .execute()
+    
+    return lectures.data
+
+
 @app.post("/subjects")
 async def create_subject(
     name: str = Form(...),
@@ -816,40 +844,13 @@ async def get_lecture(lecture_id: str):
     return result.data[0]
 
 
-# Supported transcription languages
-SUPPORTED_LANGUAGES = {
-    'en': 'English',
-    'it': 'Italian',
-    'de': 'German',
-    'es': 'Spanish',
-    'fr': 'French'
-}
-
-
-@app.get("/transcribe/languages")
-async def get_supported_languages():
-    """Get list of supported transcription languages"""
-    return {
-        'languages': [
-            {'code': code, 'name': name} 
-            for code, name in SUPPORTED_LANGUAGES.items()
-        ],
-        'default': 'en'
-    }
-
-
 @app.post("/transcribe")
 async def transcribe_lecture(
     audio: UploadFile = File(...),
     title: str = Form("Untitled Lecture"),
-    topic_id: str = Form(None),
-    language: str = Form("en")
+    topic_id: str = Form(None)
 ):
     """Transcribe audio using Groq's Whisper API (cloud-based)"""
-    
-    # Validate language
-    if language not in SUPPORTED_LANGUAGES:
-        raise HTTPException(400, f"Unsupported language. Supported: {', '.join(SUPPORTED_LANGUAGES.keys())}")
     
     # Validate file type
     valid_extensions = ('.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm')
@@ -876,7 +877,7 @@ async def transcribe_lecture(
                 file=(audio.filename, audio_file.read()),
                 model="whisper-large-v3",
                 response_format="verbose_json",  # Get segments for duration
-                language=language
+                language="en"
             )
         
         raw_transcript = transcription.text
@@ -917,8 +918,6 @@ async def transcribe_lecture(
             'raw_length': len(raw_transcript),
             'cleaned_length': len(cleaned_transcript),
             'cleaned_preview': cleaned_transcript[:500],
-            'language': language,
-            'language_name': SUPPORTED_LANGUAGES[language],
             'status': 'success'
         }
         

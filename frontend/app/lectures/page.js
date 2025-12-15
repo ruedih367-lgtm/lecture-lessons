@@ -4,26 +4,50 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getApiUrl } from '../context/AuthContext';
+import { useRouter } from 'next/navigation';
+import { useAuth, getApiUrl } from '../context/AuthContext';
 
 const API_URL = getApiUrl();
 
 export default function LecturesPage() {
+  const router = useRouter();
+  const { isAuthenticated, currentClass, authFetch } = useAuth();
+  
   const [lectures, setLectures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // Require authentication
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    
+    // Require class selection
+    if (!currentClass) {
+      router.push('/classes');
+      return;
+    }
+    
     fetchLectures();
-  }, []);
+  }, [isAuthenticated, currentClass]);
 
   const fetchLectures = async () => {
+    if (!currentClass) return;
+    
     try {
-      const response = await fetch(`${API_URL}/lectures`);
+      const response = await authFetch(`${API_URL}/classes/${currentClass.id}/lectures`);
+      
+      if (response.status === 401) {
+        router.push('/login');
+        return;
+      }
+      
       if (!response.ok) throw new Error('Failed to fetch lectures');
       
       const data = await response.json();
-      setLectures(data);
+      setLectures(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -48,14 +72,27 @@ export default function LecturesPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Show nothing while checking auth
+  if (!isAuthenticated || !currentClass) {
+    return null;
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.content}>
         <div style={styles.header}>
-          <h1 style={styles.title}>📚 All Lectures</h1>
-          <Link href="/" style={styles.backLink}>
-            ← Back to Upload
-          </Link>
+          <div>
+            <h1 style={styles.title}>Lectures</h1>
+            <p style={styles.subtitle}>Class: {currentClass.name}</p>
+          </div>
+          <div style={styles.headerActions}>
+            <Link href="/subjects" style={styles.backLink}>
+              Back to Subjects
+            </Link>
+            <Link href="/" style={styles.uploadLink}>
+              Upload Lecture
+            </Link>
+          </div>
         </div>
 
         {loading && (
@@ -63,14 +100,15 @@ export default function LecturesPage() {
         )}
 
         {error && (
-          <div style={styles.error}>❌ {error}</div>
+          <div style={styles.error}>{error}</div>
         )}
 
         {!loading && !error && lectures.length === 0 && (
           <div style={styles.empty}>
-            <p>No lectures yet. Upload your first one!</p>
-            <Link href="/" style={styles.uploadLink}>
-              🚀 Upload Lecture
+            <p>No lectures in this class yet.</p>
+            <p style={styles.emptyHint}>Upload a lecture and assign it to a topic in this class.</p>
+            <Link href="/" style={styles.uploadLinkLarge}>
+              Upload Lecture
             </Link>
           </div>
         )}
@@ -86,15 +124,15 @@ export default function LecturesPage() {
               
               <div style={styles.lectureInfo}>
                 <span style={styles.infoItem}>
-                  ⏱️ {formatDuration(lecture.audio_duration_seconds)}
+                  Duration: {formatDuration(lecture.audio_duration_seconds)}
                 </span>
                 <span style={styles.infoItem}>
-                  📅 {formatDate(lecture.created_at)}
+                  {formatDate(lecture.created_at)}
                 </span>
               </div>
 
               <div style={styles.viewButton}>
-                View Transcript →
+                View Transcript
               </div>
             </Link>
           ))}
@@ -117,16 +155,35 @@ const styles = {
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: '30px',
+    flexWrap: 'wrap',
+    gap: '15px',
   },
   title: {
     fontSize: '32px',
     fontWeight: 'bold',
+    marginBottom: '5px',
+  },
+  subtitle: {
+    fontSize: '14px',
+    color: '#666',
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '10px',
   },
   backLink: {
     padding: '10px 20px',
     backgroundColor: '#6c757d',
+    color: 'white',
+    textDecoration: 'none',
+    borderRadius: '4px',
+    fontSize: '14px',
+  },
+  uploadLink: {
+    padding: '10px 20px',
+    backgroundColor: '#28a745',
     color: 'white',
     textDecoration: 'none',
     borderRadius: '4px',
@@ -149,7 +206,12 @@ const styles = {
     backgroundColor: 'white',
     borderRadius: '8px',
   },
-  uploadLink: {
+  emptyHint: {
+    color: '#666',
+    marginTop: '10px',
+    marginBottom: '20px',
+  },
+  uploadLinkLarge: {
     display: 'inline-block',
     marginTop: '20px',
     padding: '12px 24px',

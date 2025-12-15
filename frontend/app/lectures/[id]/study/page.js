@@ -162,10 +162,10 @@ export default function StudyPage() {
 
   const getModeEmoji = (modeType) => {
     switch (modeType) {
-      case 'tutor': return '💬';
-      case 'practice': return '📝';
-      case 'exam': return '📋';
-      default: return '💬';
+      case 'tutor': return 'Tutor';
+      case 'practice': return 'Practice';
+      case 'exam': return 'Exam';
+      default: return 'Tutor';
     }
   };
 
@@ -188,13 +188,13 @@ export default function StudyPage() {
     if (learningStatus.status === 'active') {
       return (
         <div style={styles.statusBadge}>
-          ✨ AI personalized ({learningStatus.total_likes} likes)
+          AI personalized ({learningStatus.total_likes} likes)
         </div>
       );
     } else if (learningStatus.status === 'learning') {
       return (
         <div style={styles.statusBadgeLearning}>
-          🧠 {learningStatus.message}
+          {learningStatus.message}
         </div>
       );
     }
@@ -207,12 +207,12 @@ export default function StudyPage() {
         {/* Header */}
         <div style={styles.header}>
           <Link href={`/lectures/${lectureId}`} style={styles.backLink}>
-            ← Back to Lecture
+            Back to Lecture
           </Link>
           <div style={styles.headerRight}>
             {messages.length > 0 && (
               <button onClick={handleClearChat} style={styles.clearButton}>
-                🗑️ Clear
+                Clear
               </button>
             )}
           </div>
@@ -220,7 +220,7 @@ export default function StudyPage() {
 
         {/* Title */}
         <div style={styles.titleCard}>
-          <h1 style={styles.title}>🤖 AI Study Assistant</h1>
+          <h1 style={styles.title}>AI Study Assistant</h1>
           {lecture && <p style={styles.subtitle}>{lecture.title}</p>}
           {isAuthenticated && getLearningStatusBadge()}
           {!isAuthenticated && (
@@ -239,7 +239,7 @@ export default function StudyPage() {
               ...(mode === 'tutor' && styles.modeButtonActive)
             }}
           >
-            💬 Tutor
+            Tutor
           </button>
           
           <button
@@ -249,7 +249,7 @@ export default function StudyPage() {
               ...(mode === 'practice' && styles.modeButtonActive)
             }}
           >
-            📝 Practice
+            Practice
           </button>
           
           <button
@@ -259,7 +259,7 @@ export default function StudyPage() {
               ...(mode === 'exam' && styles.modeButtonActive)
             }}
           >
-            📋 Exam
+            Exam
           </button>
         </div>
 
@@ -267,11 +267,11 @@ export default function StudyPage() {
         <div style={styles.messagesContainer}>
           {messages.length === 0 && (
             <div style={styles.emptyState}>
-              <h3>👋 Start studying!</h3>
+              <h3>Start studying!</h3>
               <p>Ask questions, generate practice problems, or create mock exams.</p>
               {isAuthenticated && (
                 <p style={styles.likeHint}>
-                  👍 <strong>Like</strong> helpful responses to train the AI to your learning style!
+                  <strong>Tip:</strong> Like helpful responses to train the AI to your learning style!
                 </p>
               )}
             </div>
@@ -287,7 +287,7 @@ export default function StudyPage() {
             >
               <div style={styles.messageHeader}>
                 <span style={styles.messageRole}>
-                  {msg.role === 'user' ? `You (${getModeEmoji(msg.mode)})` : '🤖 AI Tutor'}
+                  {msg.role === 'user' ? `You (${getModeEmoji(msg.mode)})` : 'AI Tutor'}
                 </span>
               </div>
               
@@ -309,7 +309,7 @@ export default function StudyPage() {
                     }}
                     title={msg.liked ? 'Liked!' : 'This explanation helped me'}
                   >
-                    {msg.liked ? '✓ Liked' : '👍 Helpful'}
+                    {msg.liked ? 'Liked' : 'Helpful'}
                   </button>
                   
                   {/* Copy button */}
@@ -317,7 +317,7 @@ export default function StudyPage() {
                     onClick={() => handleCopyMessage(msg.content, index)}
                     style={styles.copyButton}
                   >
-                    {copiedIndex === index ? '✓ Copied' : '📋 Copy'}
+                    {copiedIndex === index ? 'Copied' : 'Copy'}
                   </button>
                 </div>
               )}
@@ -328,7 +328,7 @@ export default function StudyPage() {
                   onClick={() => handleCopyMessage(msg.content, index)}
                   style={styles.copyButtonSmall}
                 >
-                  {copiedIndex === index ? '✓' : '📋'}
+                  {copiedIndex === index ? 'Done' : 'Copy'}
                 </button>
               )}
             </div>
@@ -336,7 +336,7 @@ export default function StudyPage() {
 
           {loading && (
             <div style={styles.loadingMessage}>
-              🤖 Thinking...
+              Thinking...
             </div>
           )}
           
@@ -367,7 +367,7 @@ export default function StudyPage() {
               ...(loading || !question.trim() ? styles.sendButtonDisabled : {})
             }}
           >
-            {loading ? '⏳' : '🚀'}
+            {loading ? '...' : 'Send'}
           </button>
         </div>
       </div>
@@ -603,7 +603,7 @@ const styles = {
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontSize: '18px',
+    fontSize: '14px',
   },
   sendButtonDisabled: {
     backgroundColor: '#ccc',
