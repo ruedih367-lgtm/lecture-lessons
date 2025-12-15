@@ -29,18 +29,19 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-# CORS for frontend - add your Vercel URL when deployed
+# CORS for frontend
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    # Add your Vercel URL here after deployment, e.g.:
-    # "https://your-app-name.vercel.app",
+    "https://lecture-lessons.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
 )
 
 # ============================================
