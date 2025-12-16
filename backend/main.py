@@ -10,10 +10,11 @@ from datetime import datetime
 from PyPDF2 import PdfReader
 import io
 import json
-from typing import Optional
+from typing import Optional, List
 import random
 import string
 import re
+import subprocess
 
 load_dotenv()
 
@@ -50,6 +51,8 @@ app.add_middleware(
 LIKES_BEFORE_ANALYSIS = 5  # Analyze after this many new likes
 MAX_CONTEXT_CHARS = 48000
 MAX_AUDIO_SIZE_MB = 25  # Groq's limit
+CHUNK_SIZE_MB = 20  # Split into chunks smaller than limit
+CHUNK_DURATION_MINUTES = 10  # Target chunk duration for splitting
 
 
 # ============================================
@@ -96,6 +99,116 @@ async def check_class_membership(user_id: str, class_id: str):
 
 
 # ============================================
+# AUDIO PROCESSING HELPERS
+# ============================================
+
+def get_audio_duration(file_path: str) -> float:
+    """Get audio duration in seconds using ffprobe"""
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-show_entries', 
+                'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+                file_path
+            ],
+            capture_output=True, text=True, timeout=30
+        )
+        return float(result.stdout.strip())
+    except Exception as e:
+        print(f"Error getting duration: {e}")
+        return 0
+
+
+def split_audio_file(input_path: str, chunk_duration_seconds: int = 600) -> List[str]:
+    """
+    Split audio file into chunks using ffmpeg.
+    Returns list of chunk file paths.
+    """
+    chunk_paths = []
+    
+    try:
+        # Get total duration
+        total_duration = get_audio_duration(input_path)
+        if total_duration == 0:
+            return [input_path]  # Return original if can't determine duration
+        
+        # Calculate number of chunks needed
+        num_chunks = max(1, int(total_duration / chunk_duration_seconds) + 1)
+        
+        if num_chunks == 1:
+            return [input_path]  # No need to split
+        
+        # Get file extension
+        _, ext = os.path.splitext(input_path)
+        
+        # Split into chunks
+        for i in range(num_chunks):
+            start_time = i * chunk_duration_seconds
+            
+            # Create temp file for chunk
+            chunk_path = tempfile.NamedTemporaryFile(
+                delete=False, suffix=ext
+            ).name
+            
+            # Use ffmpeg to extract chunk
+            result = subprocess.run(
+                [
+                    'ffmpeg', '-y', '-i', input_path,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration_seconds),
+                    '-c', 'copy',  # Fast copy without re-encoding
+                    chunk_path
+                ],
+                capture_output=True, text=True, timeout=120
+            )
+            
+            # Check if chunk has content (file exists and has size)
+            if os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 1000:
+                chunk_paths.append(chunk_path)
+            else:
+                # Clean up empty chunk
+                try:
+                    os.unlink(chunk_path)
+                except:
+                    pass
+        
+        return chunk_paths if chunk_paths else [input_path]
+        
+    except Exception as e:
+        print(f"Error splitting audio: {e}")
+        return [input_path]  # Return original on error
+
+
+def transcribe_audio_chunk(file_path: str, language: str = "en") -> dict:
+    """Transcribe a single audio chunk"""
+    try:
+        with open(file_path, "rb") as audio_file:
+            transcription = groq_client.audio.transcriptions.create(
+                file=(os.path.basename(file_path), audio_file.read()),
+                model="whisper-large-v3",
+                response_format="verbose_json",
+                language=language
+            )
+        
+        # Get duration
+        duration_seconds = 0
+        if hasattr(transcription, 'duration'):
+            duration_seconds = int(transcription.duration)
+        elif hasattr(transcription, 'segments') and transcription.segments:
+            last_segment = transcription.segments[-1]
+            if hasattr(last_segment, 'end'):
+                duration_seconds = int(last_segment.end)
+        
+        return {
+            'text': transcription.text,
+            'duration': duration_seconds
+        }
+    except Exception as e:
+        print(f"Transcription error for chunk: {e}")
+        raise
+
+
+# ============================================
 # SELF-LEARNING PERSONALIZATION SYSTEM
 # ============================================
 
@@ -103,7 +216,7 @@ def analyze_response_content(content: str) -> dict:
     """Analyze a response to extract learning style indicators (NO AI needed!)"""
     
     # Check for bullet points
-    has_bullet_points = bool(re.search(r'^[\s]*[-Ã¢â‚¬Â¢*]', content, re.MULTILINE))
+    has_bullet_points = bool(re.search(r'^[\s]*[-•*]', content, re.MULTILINE))
     
     # Check for numbered steps
     has_numbered_steps = bool(re.search(r'^[\s]*\d+[.)]', content, re.MULTILINE))
@@ -333,7 +446,7 @@ async def maybe_analyze_and_update_profile(user_id: str):
         .eq('user_id', user_id)\
         .execute()
     
-    print(f"Ã¢Å“Â¨ Updated learning profile for user {user_id[:8]}... ({len(liked_result.data)} likes processed)")
+    print(f"✨ Updated learning profile for user {user_id[:8]}... ({len(liked_result.data)} likes processed)")
 
 
 # ============================================
@@ -849,52 +962,64 @@ async def get_lecture(lecture_id: str):
 async def transcribe_lecture(
     audio: UploadFile = File(...),
     title: str = Form("Untitled Lecture"),
-    topic_id: str = Form(None)
+    topic_id: str = Form(None),
+    language: str = Form("en")
 ):
-    """Transcribe audio using Groq's Whisper API (cloud-based)"""
+    """
+    Transcribe audio using Groq's Whisper API.
+    Automatically splits files >25MB into chunks.
+    """
     
     # Validate file type
     valid_extensions = ('.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm')
     if not audio.filename.lower().endswith(valid_extensions):
         raise HTTPException(400, f"Invalid format. Supported: {', '.join(valid_extensions)}")
     
+    # Validate language
+    valid_languages = ['en', 'it', 'de', 'es', 'fr']
+    if language not in valid_languages:
+        language = 'en'
+    
+    temp_files = []
+    
     try:
         # Read file and check size
         audio_content = await audio.read()
         file_size_mb = len(audio_content) / (1024 * 1024)
         
-        if file_size_mb > MAX_AUDIO_SIZE_MB:
-            raise HTTPException(400, f"File too large ({file_size_mb:.1f}MB). Maximum is {MAX_AUDIO_SIZE_MB}MB.")
-        
-        # Save to temp file (Groq API needs a file)
+        # Save to temp file
         suffix = os.path.splitext(audio.filename)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(audio_content)
             tmp_path = tmp.name
+            temp_files.append(tmp_path)
         
-        # Transcribe using Groq's Whisper API
-        with open(tmp_path, "rb") as audio_file:
-            transcription = groq_client.audio.transcriptions.create(
-                file=(audio.filename, audio_file.read()),
-                model="whisper-large-v3",
-                response_format="verbose_json",  # Get segments for duration
-                language="en"
-            )
+        all_transcripts = []
+        total_duration = 0
         
-        raw_transcript = transcription.text
-        
-        # Try to get duration from transcription response
-        duration_seconds = 0
-        if hasattr(transcription, 'duration'):
-            duration_seconds = int(transcription.duration)
-        elif hasattr(transcription, 'segments') and transcription.segments:
-            # Get end time of last segment
-            last_segment = transcription.segments[-1]
-            if hasattr(last_segment, 'end'):
-                duration_seconds = int(last_segment.end)
-        
-        # Clean up temp file
-        os.unlink(tmp_path)
+        # Check if we need to split
+        if file_size_mb > MAX_AUDIO_SIZE_MB:
+            print(f"📦 File is {file_size_mb:.1f}MB, splitting into chunks...")
+            
+            # Split the audio file
+            chunk_paths = split_audio_file(tmp_path, CHUNK_DURATION_MINUTES * 60)
+            temp_files.extend([p for p in chunk_paths if p != tmp_path])
+            
+            print(f"📦 Split into {len(chunk_paths)} chunks")
+            
+            # Transcribe each chunk
+            for i, chunk_path in enumerate(chunk_paths):
+                print(f"🎤 Transcribing chunk {i+1}/{len(chunk_paths)}...")
+                result = transcribe_audio_chunk(chunk_path, language)
+                all_transcripts.append(result['text'])
+                total_duration += result['duration']
+            
+            raw_transcript = "\n\n".join(all_transcripts)
+        else:
+            # Single file transcription
+            result = transcribe_audio_chunk(tmp_path, language)
+            raw_transcript = result['text']
+            total_duration = result['duration']
         
         # Clean transcript with LLaMA
         cleaned_transcript = clean_transcript_with_groq(raw_transcript, title)
@@ -904,7 +1029,7 @@ async def transcribe_lecture(
             'title': title,
             'raw_transcript': raw_transcript,
             'cleaned_transcript': cleaned_transcript,
-            'audio_duration_seconds': duration_seconds,
+            'audio_duration_seconds': total_duration,
             'recording_date': datetime.now().isoformat()
         }
         if topic_id:
@@ -912,23 +1037,160 @@ async def transcribe_lecture(
         
         result = supabase.table('lectures').insert(lecture_data).execute()
         
+        # Get language name for response
+        language_names = {
+            'en': 'English', 'it': 'Italian', 'de': 'German', 
+            'es': 'Spanish', 'fr': 'French'
+        }
+        
         return {
             'lecture_id': result.data[0]['id'],
             'title': title,
-            'duration_seconds': duration_seconds,
+            'duration_seconds': total_duration,
             'raw_length': len(raw_transcript),
             'cleaned_length': len(cleaned_transcript),
             'cleaned_preview': cleaned_transcript[:500],
+            'language': language,
+            'language_name': language_names.get(language, 'Unknown'),
+            'chunks_processed': len(all_transcripts) if file_size_mb > MAX_AUDIO_SIZE_MB else 1,
             'status': 'success'
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        if 'tmp_path' in locals():
-            try: os.unlink(tmp_path)
-            except: pass
         raise HTTPException(500, f"Transcription failed: {str(e)}")
+    finally:
+        # Clean up all temp files
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except:
+                pass
+
+
+@app.post("/transcribe-multi")
+async def transcribe_multiple_files(
+    audio_files: List[UploadFile] = File(...),
+    title: str = Form("Untitled Lecture"),
+    topic_id: str = Form(None),
+    language: str = Form("en")
+):
+    """
+    Transcribe multiple audio files and combine into one lecture.
+    Useful for lectures recorded in multiple parts (e.g., before/after break).
+    """
+    
+    valid_extensions = ('.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm')
+    valid_languages = ['en', 'it', 'de', 'es', 'fr']
+    
+    if language not in valid_languages:
+        language = 'en'
+    
+    if not audio_files:
+        raise HTTPException(400, "No audio files provided")
+    
+    if len(audio_files) > 10:
+        raise HTTPException(400, "Maximum 10 files allowed per upload")
+    
+    # Validate all files first
+    for audio in audio_files:
+        if not audio.filename.lower().endswith(valid_extensions):
+            raise HTTPException(400, f"Invalid format for {audio.filename}. Supported: {', '.join(valid_extensions)}")
+    
+    temp_files = []
+    all_transcripts = []
+    total_duration = 0
+    
+    try:
+        for i, audio in enumerate(audio_files, 1):
+            print(f"📁 Processing file {i}/{len(audio_files)}: {audio.filename}")
+            
+            # Read and save to temp file
+            audio_content = await audio.read()
+            file_size_mb = len(audio_content) / (1024 * 1024)
+            
+            suffix = os.path.splitext(audio.filename)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(audio_content)
+                tmp_path = tmp.name
+                temp_files.append(tmp_path)
+            
+            # Check if this file needs splitting
+            if file_size_mb > MAX_AUDIO_SIZE_MB:
+                print(f"  📦 File is {file_size_mb:.1f}MB, splitting...")
+                chunk_paths = split_audio_file(tmp_path, CHUNK_DURATION_MINUTES * 60)
+                temp_files.extend([p for p in chunk_paths if p != tmp_path])
+                
+                for j, chunk_path in enumerate(chunk_paths):
+                    print(f"  🎤 Transcribing chunk {j+1}/{len(chunk_paths)}...")
+                    result = transcribe_audio_chunk(chunk_path, language)
+                    all_transcripts.append(result['text'])
+                    total_duration += result['duration']
+            else:
+                print(f"  🎤 Transcribing...")
+                result = transcribe_audio_chunk(tmp_path, language)
+                all_transcripts.append(result['text'])
+                total_duration += result['duration']
+        
+        # Combine all transcripts with part markers
+        if len(audio_files) > 1:
+            raw_transcript = ""
+            transcript_idx = 0
+            for i, audio in enumerate(audio_files, 1):
+                raw_transcript += f"\n\n--- Part {i}: {audio.filename} ---\n\n"
+                # Add transcripts for this file (may be multiple if split)
+                raw_transcript += all_transcripts[transcript_idx]
+                transcript_idx += 1
+        else:
+            raw_transcript = "\n\n".join(all_transcripts)
+        
+        # Clean transcript
+        cleaned_transcript = clean_transcript_with_groq(raw_transcript, title)
+        
+        # Save to database
+        lecture_data = {
+            'title': title,
+            'raw_transcript': raw_transcript,
+            'cleaned_transcript': cleaned_transcript,
+            'audio_duration_seconds': total_duration,
+            'recording_date': datetime.now().isoformat()
+        }
+        if topic_id:
+            lecture_data['topic_id'] = topic_id
+        
+        result = supabase.table('lectures').insert(lecture_data).execute()
+        
+        language_names = {
+            'en': 'English', 'it': 'Italian', 'de': 'German', 
+            'es': 'Spanish', 'fr': 'French'
+        }
+        
+        return {
+            'lecture_id': result.data[0]['id'],
+            'title': title,
+            'duration_seconds': total_duration,
+            'raw_length': len(raw_transcript),
+            'cleaned_length': len(cleaned_transcript),
+            'cleaned_preview': cleaned_transcript[:500],
+            'language': language,
+            'language_name': language_names.get(language, 'Unknown'),
+            'files_processed': len(audio_files),
+            'total_chunks': len(all_transcripts),
+            'status': 'success'
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Multi-file transcription failed: {str(e)}")
+    finally:
+        # Clean up all temp files
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except:
+                pass
 
 
 def clean_transcript_with_groq(raw_text: str, subject_context: str) -> str:
@@ -1104,8 +1366,23 @@ async def delete_subject(subject_id: str):
 
 
 # ============================================
-# AI TUTORING (WITH SELF-LEARNING PERSONALIZATION)
+# AI TUTORING (WITH SELF-LEARNING PERSONALIZATION & TABLE SUPPORT)
 # ============================================
+
+# Base formatting instructions for all AI modes
+FORMATTING_INSTRUCTIONS = """
+FORMATTING GUIDELINES:
+- Use **bold** for key terms and important concepts
+- Use markdown tables when comparing items, showing data, or listing properties:
+  | Column 1 | Column 2 | Column 3 |
+  |----------|----------|----------|
+  | Data 1   | Data 2   | Data 3   |
+- Use bullet points for lists of items
+- Use numbered lists for sequential steps or processes
+- Use code blocks with ``` for formulas, code, or technical notation
+- Keep formatting clean and readable
+"""
+
 
 @app.post("/lectures/{lecture_id}/ask")
 async def ask_lecture_question(
@@ -1275,10 +1552,19 @@ async def ask_subject_question(
 
 
 async def tutor_mode(context: str, question: str, history: list = None, personalization: str = "") -> str:
-    """Answer questions (personalized)"""
+    """Answer questions (personalized with table support)"""
     
     system = f"""You are a helpful tutor. Answer using ONLY the provided content.
 Be encouraging. If something isn't covered, say so.
+
+{FORMATTING_INSTRUCTIONS}
+
+When answering questions that involve:
+- Comparisons → Use a TABLE to show differences/similarities
+- Multiple items with properties → Use a TABLE
+- Processes or sequences → Use NUMBERED LISTS
+- Key concepts → Use **bold** for important terms
+
 {personalization}
 
 CONTENT:
@@ -1301,11 +1587,22 @@ CONTENT:
 
 
 async def practice_mode(context: str, question: str, history: list = None, personalization: str = "") -> str:
-    """Generate practice problems (personalized)"""
+    """Generate practice problems (personalized with table support)"""
     
     system = f"""Create practice problems based on this content.
 Generate 5-10 problems with varying difficulty.
 Include ANSWERS section at end.
+
+{FORMATTING_INSTRUCTIONS}
+
+Format problems clearly:
+- Number each problem
+- For multiple choice, use a TABLE to show options:
+  | Option | Answer |
+  |--------|--------|
+  | A      | ...    |
+- Group answers in a clear ANSWERS section at the end
+
 {personalization}
 
 CONTENT:
@@ -1328,11 +1625,23 @@ CONTENT:
 
 
 async def exam_mode(context: str, question: str, history: list = None, personalization: str = "") -> str:
-    """Generate mock exam (personalized)"""
+    """Generate mock exam (personalized with table support)"""
     
     system = f"""Create a mock exam based on this content.
 Include 15-25 questions: multiple choice, true/false, short answer.
 Include ANSWER KEY at end.
+
+{FORMATTING_INSTRUCTIONS}
+
+Format the exam professionally:
+- Use clear section headers
+- Number all questions
+- For multiple choice, format options clearly (A, B, C, D)
+- Use a TABLE for the answer key:
+  | Question | Answer | Explanation |
+  |----------|--------|-------------|
+  | 1        | B      | Brief why   |
+
 {personalization}
 
 CONTENT:
@@ -1398,11 +1707,19 @@ async def generate_subject_quiz(subject_id: str, num_questions: int = Form(30)):
 
 
 async def generate_quiz(content: str, num_questions: int) -> str:
+    prompt = f"""Create {num_questions} quiz questions. Include multiple choice, true/false, short answer.
+
+{FORMATTING_INSTRUCTIONS}
+
+Use a TABLE for the answer key at the end:
+| Q# | Answer | Brief Explanation |
+|----|--------|-------------------|
+
+CONTENT:
+{content}"""
+    
     response = groq_client.chat.completions.create(
-        messages=[{
-            "role": "user",
-            "content": f"Create {num_questions} quiz questions. Include multiple choice, true/false, short answer. End with ANSWER KEY.\n\nCONTENT:\n{content}"
-        }],
+        messages=[{"role": "user", "content": prompt}],
         model="llama-3.3-70b-versatile",
         temperature=0.7,
         max_tokens=4096
@@ -1418,7 +1735,10 @@ async def root():
         "ai_model": "llama-3.3-70b-versatile",
         "auth": "enabled",
         "self_learning": "enabled",
-        "max_audio_mb": MAX_AUDIO_SIZE_MB
+        "max_audio_mb": MAX_AUDIO_SIZE_MB,
+        "auto_split": "enabled",
+        "multi_file_upload": "enabled",
+        "table_formatting": "enabled"
     }
 
 
