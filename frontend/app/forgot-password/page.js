@@ -1,19 +1,17 @@
-// frontend/app/login/page.js
+// frontend/app/forgot-password/page.js
 
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '../context/AuthContext';
+import { getApiUrl } from '../context/AuthContext';
 
-export default function LoginPage() {
-  const router = useRouter();
-  const { login } = useAuth();
-  
+const API_URL = getApiUrl();
+
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
@@ -22,20 +20,54 @@ export default function LoginPage() {
     setError('');
 
     try {
-      await login(email, password);
-      router.push('/classes');
+      const formData = new FormData();
+      formData.append('email', email);
+
+      const response = await fetch(`${API_URL}/auth/request-reset`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setSubmitted(true);
+      } else {
+        setError(data.message || 'Something went wrong');
+      }
     } catch (err) {
-      setError(err.message);
+      setError('Failed to send reset email. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  if (submitted) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.card}>
+          <h1 style={styles.title}>📧 Check Your Email</h1>
+          <p style={styles.message}>
+            If an account exists with <strong>{email}</strong>, you will receive a password reset link shortly.
+          </p>
+          <p style={styles.hint}>
+            Don't see it? Check your spam folder.
+          </p>
+          <Link href="/login" style={styles.backButton}>
+            ← Back to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>🎓 Welcome Back</h1>
-        <p style={styles.subtitle}>Log in to access your classes</p>
+        <h1 style={styles.title}>🔐 Reset Password</h1>
+        <p style={styles.subtitle}>
+          Enter your email address and we'll send you a link to reset your password.
+        </p>
 
         {error && (
           <div style={styles.error}>❌ {error}</div>
@@ -43,7 +75,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.field}>
-            <label style={styles.label}>Email</label>
+            <label style={styles.label}>Email Address</label>
             <input
               type="email"
               value={email}
@@ -54,24 +86,6 @@ export default function LoginPage() {
             />
           </div>
 
-          <div style={styles.field}>
-            <label style={styles.label}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              style={styles.input}
-              required
-            />
-          </div>
-
-          <div style={styles.forgotPassword}>
-            <Link href="/forgot-password" style={styles.forgotLink}>
-              Forgot your password?
-            </Link>
-          </div>
-
           <button
             type="submit"
             disabled={loading}
@@ -80,14 +94,13 @@ export default function LoginPage() {
               ...(loading ? styles.buttonDisabled : {})
             }}
           >
-            {loading ? '⏳ Logging in...' : '🚀 Log In'}
+            {loading ? '⏳ Sending...' : '📧 Send Reset Link'}
           </button>
         </form>
 
         <div style={styles.footer}>
-          <p>Don't have an account?</p>
-          <Link href="/signup" style={styles.link}>
-            Create Account →
+          <Link href="/login" style={styles.link}>
+            ← Back to Login
           </Link>
         </div>
       </div>
@@ -122,6 +135,19 @@ const styles = {
     color: '#666',
     textAlign: 'center',
     marginBottom: '30px',
+    lineHeight: '1.5',
+  },
+  message: {
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: '20px',
+    lineHeight: '1.6',
+  },
+  hint: {
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: '30px',
+    fontSize: '14px',
   },
   error: {
     backgroundColor: '#ffebee',
@@ -151,16 +177,6 @@ const styles = {
     border: '1px solid #ddd',
     borderRadius: '6px',
     fontSize: '16px',
-    transition: 'border-color 0.2s',
-  },
-  forgotPassword: {
-    textAlign: 'right',
-    marginTop: '-10px',
-  },
-  forgotLink: {
-    color: '#0066cc',
-    textDecoration: 'none',
-    fontSize: '14px',
   },
   button: {
     padding: '14px',
@@ -177,15 +193,24 @@ const styles = {
     backgroundColor: '#ccc',
     cursor: 'not-allowed',
   },
+  backButton: {
+    display: 'block',
+    textAlign: 'center',
+    padding: '14px',
+    backgroundColor: '#6c757d',
+    color: 'white',
+    textDecoration: 'none',
+    borderRadius: '6px',
+    fontSize: '16px',
+    fontWeight: '600',
+  },
   footer: {
     textAlign: 'center',
     marginTop: '30px',
-    color: '#666',
-    fontSize: '14px',
   },
   link: {
     color: '#0066cc',
     textDecoration: 'none',
-    fontWeight: '600',
+    fontSize: '14px',
   },
 };

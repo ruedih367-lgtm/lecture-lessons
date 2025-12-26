@@ -634,6 +634,61 @@ async def logout(user_id: str = Depends(require_auth)):
     except:
         return {"success": True, "message": "Logged out"}
 
+@app.post("/auth/request-reset")
+async def request_password_reset(email: str = Form(...)):
+    """Request a password reset email"""
+    try:
+        # Supabase sends a reset email with a link to your site
+        supabase.auth.reset_password_email(
+            email,
+            options={
+                "redirect_to": "https://lecture-lessons.vercel.app/reset-password"
+            }
+        )
+        
+        # Always return success to prevent email enumeration
+        return {
+            "success": True,
+            "message": "If an account exists with this email, you will receive a password reset link."
+        }
+    except Exception as e:
+        print(f"Password reset request error: {e}")
+        # Still return success to prevent email enumeration
+        return {
+            "success": True,
+            "message": "If an account exists with this email, you will receive a password reset link."
+        }
+
+
+@app.post("/auth/reset-password")
+async def reset_password(
+    access_token: str = Form(...),
+    new_password: str = Form(...)
+):
+    """Reset password using the token from the reset email"""
+    try:
+        # Set the session with the recovery token, then update password
+        # The frontend extracts access_token from URL hash after user clicks email link
+        
+        # Create a new client session with the recovery token
+        supabase.auth.set_session(access_token, "")
+        
+        # Update the user's password
+        result = supabase.auth.update_user({
+            "password": new_password
+        })
+        
+        if result.user:
+            return {
+                "success": True,
+                "message": "Password updated successfully! You can now log in."
+            }
+        else:
+            raise HTTPException(400, "Failed to update password")
+            
+    except Exception as e:
+        print(f"Password reset error: {e}")
+        raise HTTPException(400, f"Failed to reset password: {str(e)}")
 
 @app.get("/auth/me")
 async def get_me(authorization: Optional[str] = Header(None)):
@@ -968,6 +1023,7 @@ async def transcribe_lecture(
     """
     Transcribe audio using Groq's Whisper API.
     Automatically splits files >25MB into chunks.
+    Generates both cleaned transcript and summary.
     """
     
     # Validate file type
@@ -1022,13 +1078,19 @@ async def transcribe_lecture(
             total_duration = result['duration']
         
         # Clean transcript with LLaMA
+        print("✨ Cleaning transcript...")
         cleaned_transcript = clean_transcript_with_groq(raw_transcript, title)
+        
+        # Generate summary
+        print("📝 Generating summary...")
+        summary = generate_summary_with_groq(cleaned_transcript, title)
         
         # Save to database
         lecture_data = {
             'title': title,
             'raw_transcript': raw_transcript,
             'cleaned_transcript': cleaned_transcript,
+            'summary': summary,  # NEW FIELD
             'audio_duration_seconds': total_duration,
             'recording_date': datetime.now().isoformat()
         }
@@ -1049,6 +1111,7 @@ async def transcribe_lecture(
             'duration_seconds': total_duration,
             'raw_length': len(raw_transcript),
             'cleaned_length': len(cleaned_transcript),
+            'summary_length': len(summary),  # NEW
             'cleaned_preview': cleaned_transcript[:500],
             'language': language,
             'language_name': language_names.get(language, 'Unknown'),
@@ -1078,7 +1141,8 @@ async def transcribe_multiple_files(
 ):
     """
     Transcribe multiple audio files and combine into one lecture.
-    Useful for lectures recorded in multiple parts (e.g., before/after break).
+    Useful for lectures recorded in multiple parts.
+    Generates both cleaned transcript and summary.
     """
     
     valid_extensions = ('.mp3', '.wav', '.m4a', '.mp4', '.ogg', '.flac', '.webm')
@@ -1139,20 +1203,25 @@ async def transcribe_multiple_files(
             transcript_idx = 0
             for i, audio in enumerate(audio_files, 1):
                 raw_transcript += f"\n\n--- Part {i}: {audio.filename} ---\n\n"
-                # Add transcripts for this file (may be multiple if split)
                 raw_transcript += all_transcripts[transcript_idx]
                 transcript_idx += 1
         else:
             raw_transcript = "\n\n".join(all_transcripts)
         
         # Clean transcript
+        print("✨ Cleaning transcript...")
         cleaned_transcript = clean_transcript_with_groq(raw_transcript, title)
+        
+        # Generate summary
+        print("📝 Generating summary...")
+        summary = generate_summary_with_groq(cleaned_transcript, title)
         
         # Save to database
         lecture_data = {
             'title': title,
             'raw_transcript': raw_transcript,
             'cleaned_transcript': cleaned_transcript,
+            'summary': summary,  # NEW FIELD
             'audio_duration_seconds': total_duration,
             'recording_date': datetime.now().isoformat()
         }
@@ -1172,6 +1241,7 @@ async def transcribe_multiple_files(
             'duration_seconds': total_duration,
             'raw_length': len(raw_transcript),
             'cleaned_length': len(cleaned_transcript),
+            'summary_length': len(summary),  # NEW
             'cleaned_preview': cleaned_transcript[:500],
             'language': language,
             'language_name': language_names.get(language, 'Unknown'),
@@ -1215,6 +1285,56 @@ Return ONLY cleaned transcript:"""
         return response.choices[0].message.content.strip()
     except:
         return raw_text
+
+def generate_summary_with_groq(transcript: str, title: str) -> str:
+    """Generate an adaptive summary of the transcript.
+    
+    The summary length varies based on content density - 
+    dense lectures get longer summaries, simpler ones get shorter.
+    Goal: Preserve all important information for studying.
+    """
+    
+    prompt = f"""Create a thorough summary of this lecture transcript for study purposes.
+
+GUIDELINES:
+- Adapt length to content density - include everything important
+- Preserve ALL key concepts, definitions, and terminology
+- Keep important examples that illustrate concepts
+- Maintain formulas, equations, or technical details exactly
+- Include any lists, steps, or processes mentioned
+- Note relationships between concepts
+- Keep names, dates, and specific facts
+- Structure with clear sections if the lecture covers multiple topics
+
+DO NOT:
+- Add information not in the transcript
+- Oversimplify complex concepts
+- Skip examples that help understanding
+- Use generic filler phrases
+
+The summary should be detailed enough that a student could study from it
+without missing critical information, but shorter than the full transcript.
+
+LECTURE TITLE: {title}
+
+TRANSCRIPT:
+{transcript}
+
+SUMMARY:"""
+
+    try:
+        response = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.3,
+            max_tokens=4096
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Summary generation error: {e}")
+        # Return a truncated version as fallback
+        return transcript[:3000] + "\n\n[Summary generation failed - truncated transcript]"
+
 
 
 @app.post("/lectures/{lecture_id}/upload-pdf")
@@ -1515,7 +1635,7 @@ async def ask_subject_question(
     chat_history: str = Form("[]"),
     authorization: Optional[str] = Header(None)
 ):
-    """AI tutor for subject (personalized)"""
+    """AI tutor for subject (uses SUMMARIES to reduce token usage)"""
     
     user_id = await get_current_user(authorization)
     personalization = ""
@@ -1533,19 +1653,24 @@ async def ask_subject_question(
         raise HTTPException(404, "No topics")
     
     topic_ids = [t['id'] for t in topics.data]
+    
+    # Fetch lectures with SUMMARY instead of full transcript
     lectures = supabase.table('lectures')\
-        .select('title, cleaned_transcript')\
+        .select('title, summary, cleaned_transcript')\
         .in_('topic_id', topic_ids).execute()
     
     if not lectures.data:
         raise HTTPException(404, "No lectures")
     
-    context = f"SUBJECT ({len(lectures.data)} lectures):\n"
+    # Build context using summaries (fall back to truncated transcript if no summary)
+    context = f"SUBJECT ({len(lectures.data)} lectures) - Using summaries for efficiency:\n"
     for i, lec in enumerate(lectures.data, 1):
-        context += f"\n--- Lecture {i}: {lec['title']} ---\n{lec['cleaned_transcript'][:5000]}"
+        # Use summary if available, otherwise truncate transcript
+        content = lec.get('summary') or lec['cleaned_transcript'][:3000]
+        context += f"\n--- Lecture {i}: {lec['title']} ---\n{content}"
     
     if len(context) > MAX_CONTEXT_CHARS:
-        raise HTTPException(400, "Subject too large")
+        raise HTTPException(400, "Subject too large (even with summaries)")
     
     response = await tutor_mode(context, question, history, personalization)
     return {'question': question, 'mode': 'tutor', 'response': response}
@@ -1738,7 +1863,8 @@ async def root():
         "max_audio_mb": MAX_AUDIO_SIZE_MB,
         "auto_split": "enabled",
         "multi_file_upload": "enabled",
-        "table_formatting": "enabled"
+        "table_formatting": "enabled",
+        "auto_summary": "enabled"  # NEW
     }
 
 

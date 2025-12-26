@@ -17,7 +17,7 @@ export default function LecturePage() {
   const [lecture, setLecture] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showRaw, setShowRaw] = useState(false);
+  const [viewMode, setViewMode] = useState('cleaned'); // 'cleaned', 'raw', or 'summary'
   const [materials, setMaterials] = useState([]);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [pdfFile, setPdfFile] = useState(null);
@@ -87,7 +87,6 @@ export default function LecturePage() {
     }
   };
 
-  // DELETE LECTURE FUNCTION
   const handleDeleteLecture = async () => {
     const confirmMsg = `DELETE LECTURE?\n\nThis will permanently delete:\n- "${lecture.title}"\n- All uploaded materials (${materials.length} files)\n\nThis cannot be undone!`;
     
@@ -128,6 +127,31 @@ export default function LecturePage() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getDisplayedContent = () => {
+    if (!lecture) return '';
+    switch (viewMode) {
+      case 'raw':
+        return lecture.raw_transcript;
+      case 'summary':
+        return lecture.summary || 'No summary available for this lecture.';
+      case 'cleaned':
+      default:
+        return lecture.cleaned_transcript;
+    }
+  };
+
+  const getContentLabel = () => {
+    switch (viewMode) {
+      case 'raw':
+        return 'Raw Transcript';
+      case 'summary':
+        return 'Summary';
+      case 'cleaned':
+      default:
+        return 'Cleaned Transcript';
+    }
   };
 
   if (loading) {
@@ -177,9 +201,14 @@ export default function LecturePage() {
             <span style={styles.metaItem}>
               {lecture.cleaned_transcript?.length || 0} characters
             </span>
+            {lecture.summary && (
+              <span style={styles.metaItem}>
+                📝 Summary available
+              </span>
+            )}
           </div>
 
-          {/* ACTIONS MOVED HERE - at the top */}
+          {/* ACTIONS */}
           <div style={styles.actions}>
             <Link href={`/lectures/${lectureId}/study`} style={styles.studyButton}>
               AI Study Assistant
@@ -187,23 +216,15 @@ export default function LecturePage() {
             
             <button
               onClick={() => {
-                const text = showRaw ? lecture.raw_transcript : lecture.cleaned_transcript;
+                const text = getDisplayedContent();
                 navigator.clipboard.writeText(text);
-                alert('Transcript copied to clipboard!');
+                alert(`${getContentLabel()} copied to clipboard!`);
               }}
               style={styles.actionButton}
             >
-              Copy Transcript
+              Copy {getContentLabel()}
             </button>
 
-            <button
-              onClick={() => setShowRaw(!showRaw)}
-              style={styles.toggleButton}
-            >
-              {showRaw ? 'Show Cleaned Version' : 'Show Raw Transcript'}
-            </button>
-
-            {/* DELETE BUTTON */}
             <button
               onClick={handleDeleteLecture}
               disabled={deleting}
@@ -215,6 +236,40 @@ export default function LecturePage() {
               {deleting ? 'Deleting...' : 'Delete Lecture'}
             </button>
           </div>
+        </div>
+
+        {/* View Mode Toggle */}
+        <div style={styles.viewToggle}>
+          <button
+            onClick={() => setViewMode('cleaned')}
+            style={{
+              ...styles.toggleButton,
+              ...(viewMode === 'cleaned' ? styles.toggleButtonActive : {})
+            }}
+          >
+            📄 Cleaned Transcript
+          </button>
+          <button
+            onClick={() => setViewMode('summary')}
+            style={{
+              ...styles.toggleButton,
+              ...(viewMode === 'summary' ? styles.toggleButtonActive : {}),
+              ...(!lecture.summary ? styles.toggleButtonDisabled : {})
+            }}
+            disabled={!lecture.summary}
+            title={!lecture.summary ? 'No summary available' : 'View summary'}
+          >
+            📝 Summary
+          </button>
+          <button
+            onClick={() => setViewMode('raw')}
+            style={{
+              ...styles.toggleButton,
+              ...(viewMode === 'raw' ? styles.toggleButtonActive : {})
+            }}
+          >
+            📋 Raw Transcript
+          </button>
         </div>
 
         {/* Materials Section */}
@@ -268,14 +323,20 @@ export default function LecturePage() {
           )}
         </div>
 
-        {/* Transcript Display */}
+        {/* Transcript/Summary Display */}
         <div style={styles.transcriptCard}>
           <h2 style={styles.transcriptTitle}>
-            {showRaw ? 'Raw Transcript' : 'Cleaned Transcript'}
+            {getContentLabel()}
+            {viewMode === 'summary' && (
+              <span style={styles.summaryBadge}>
+                {lecture.summary?.length || 0} chars (
+                {Math.round((lecture.summary?.length || 0) / (lecture.cleaned_transcript?.length || 1) * 100)}% of full)
+              </span>
+            )}
           </h2>
           
           <div style={styles.transcript}>
-            {showRaw ? lecture.raw_transcript : lecture.cleaned_transcript}
+            {getDisplayedContent()}
           </div>
         </div>
       </div>
@@ -366,15 +427,6 @@ const styles = {
     fontSize: '14px',
     fontWeight: '600',
   },
-  toggleButton: {
-    padding: '12px 24px',
-    backgroundColor: '#f0f0f0',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600',
-  },
   deleteButton: {
     padding: '12px 24px',
     backgroundColor: '#dc3545',
@@ -389,6 +441,32 @@ const styles = {
     backgroundColor: '#ccc',
     cursor: 'not-allowed',
   },
+  viewToggle: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+  },
+  toggleButton: {
+    padding: '10px 20px',
+    backgroundColor: 'white',
+    border: '2px solid #ddd',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.2s',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#0066cc',
+    color: 'white',
+    borderColor: '#0066cc',
+  },
+  toggleButtonDisabled: {
+    backgroundColor: '#f5f5f5',
+    color: '#999',
+    cursor: 'not-allowed',
+  },
   transcriptCard: {
     backgroundColor: 'white',
     padding: '30px',
@@ -401,6 +479,18 @@ const styles = {
     fontWeight: '600',
     marginBottom: '20px',
     color: '#333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    flexWrap: 'wrap',
+  },
+  summaryBadge: {
+    fontSize: '12px',
+    fontWeight: 'normal',
+    color: '#666',
+    backgroundColor: '#e8f5e9',
+    padding: '4px 10px',
+    borderRadius: '12px',
   },
   transcript: {
     lineHeight: '1.8',
