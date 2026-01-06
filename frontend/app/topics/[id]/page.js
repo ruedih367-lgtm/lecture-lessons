@@ -1,4 +1,5 @@
-//frontend/app/topics/[id]/page.js
+// frontend/app/topics/[id]/page.js
+// REPLACE the entire file with this
 
 'use client';
 
@@ -6,6 +7,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { getApiUrl } from '../../context/AuthContext';
+import PdfUploader from '../../components/PdfUploader';
 
 const API_URL = getApiUrl();
 
@@ -22,9 +24,8 @@ export default function TopicDetailPage() {
   const [quiz, setQuiz] = useState(null);
   const [deletingTopic, setDeletingTopic] = useState(false);
   const [deletingLectureId, setDeletingLectureId] = useState(null);
-  const [pdfFile, setPdfFile] = useState(null);
-  const [uploadingPdf, setUploadingPdf] = useState(false);
   const [deletingMaterialId, setDeletingMaterialId] = useState(null);
+  const [showPdfUploader, setShowPdfUploader] = useState(false);
 
   useEffect(() => {
     if (topicId) {
@@ -66,35 +67,9 @@ export default function TopicDetailPage() {
     }
   };
 
-  const handlePdfUpload = async () => {
-    if (!pdfFile) return;
-
-    setUploadingPdf(true);
-    
-    const formData = new FormData();
-    formData.append('pdf', pdfFile);
-
-    try {
-      const response = await fetch(`${API_URL}/topics/${topicId}/upload-pdf`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('PDF upload failed');
-      }
-
-      const data = await response.json();
-      alert(`✅ PDF uploaded! Extracted ${data.pages} pages with ${data.extracted_chars} characters.`);
-      
-      fetchMaterials();
-      setPdfFile(null);
-      
-    } catch (err) {
-      alert(`❌ Upload failed: ${err.message}`);
-    } finally {
-      setUploadingPdf(false);
-    }
+  const handlePdfUploadComplete = (data) => {
+    fetchMaterials();
+    setShowPdfUploader(false);
   };
 
   const handleDeleteMaterial = async (materialId, fileName) => {
@@ -111,11 +86,10 @@ export default function TopicDetailPage() {
         throw new Error('Failed to delete material');
       }
 
-      alert('✅ Material deleted!');
+      alert('Material deleted!');
       fetchMaterials();
-      
     } catch (err) {
-      alert(`❌ Delete failed: ${err.message}`);
+      alert(`Delete failed: ${err.message}`);
     } finally {
       setDeletingMaterialId(null);
     }
@@ -150,7 +124,7 @@ export default function TopicDetailPage() {
   };
 
   const handleDeleteTopic = async () => {
-    const confirmMsg = `⚠️ DELETE ENTIRE TOPIC?\n\nThis will permanently delete:\n• This topic\n• ${lectures.length} lectures\n• All materials in those lectures\n\nThis cannot be undone!`;
+    const confirmMsg = `DELETE ENTIRE TOPIC?\n\nThis will permanently delete:\n- This topic\n- ${lectures.length} lectures\n- All materials\n\nThis cannot be undone!`;
     
     if (!confirm(confirmMsg)) return;
 
@@ -166,11 +140,10 @@ export default function TopicDetailPage() {
       }
 
       const data = await response.json();
-      alert(`✅ Topic deleted with ${data.deleted_lectures} lectures`);
+      alert(`Topic deleted with ${data.deleted_lectures} lectures`);
       router.push('/subjects');
-      
     } catch (err) {
-      alert(`❌ Delete failed: ${err.message}`);
+      alert(`Delete failed: ${err.message}`);
       setDeletingTopic(false);
     }
   };
@@ -179,7 +152,7 @@ export default function TopicDetailPage() {
     e.preventDefault();
     e.stopPropagation();
 
-    const confirmMsg = `⚠️ Delete lecture?\n\n"${lecture.title}"\n\nThis will also delete all materials for this lecture.`;
+    const confirmMsg = `Delete lecture?\n\n"${lecture.title}"\n\nThis will also delete all materials for this lecture.`;
     
     if (!confirm(confirmMsg)) return;
 
@@ -194,11 +167,10 @@ export default function TopicDetailPage() {
         throw new Error('Failed to delete lecture');
       }
 
-      alert('✅ Lecture deleted!');
+      alert('Lecture deleted!');
       fetchLectures();
-      
     } catch (err) {
-      alert(`❌ Delete failed: ${err.message}`);
+      alert(`Delete failed: ${err.message}`);
     } finally {
       setDeletingLectureId(null);
     }
@@ -224,12 +196,12 @@ export default function TopicDetailPage() {
       <div style={styles.content}>
         <div style={styles.header}>
           <Link href="/subjects" style={styles.backLink}>
-            ← Back to Subjects
+            Back to Subjects
           </Link>
         </div>
 
         <div style={styles.titleCard}>
-          <h1 style={styles.title}>📂 {topic?.name || 'Topic'}</h1>
+          <h1 style={styles.title}>{topic?.name || 'Topic'}</h1>
           {topic?.description && (
             <p style={styles.description}>{topic.description}</p>
           )}
@@ -241,7 +213,7 @@ export default function TopicDetailPage() {
                 ...(lectures.length === 0 ? styles.buttonDisabled : {})
               }}
             >
-              🤖 AI Study Assistant
+              AI Study Assistant
             </Link>
             
             <button
@@ -252,7 +224,7 @@ export default function TopicDetailPage() {
                 ...(generatingQuiz || lectures.length === 0 ? styles.buttonDisabled : {})
               }}
             >
-              {generatingQuiz ? '⏳ Generating Quiz...' : '📋 Generate Topic Quiz'}
+              {generatingQuiz ? 'Generating Quiz...' : 'Generate Topic Quiz'}
             </button>
             
             <button
@@ -263,52 +235,47 @@ export default function TopicDetailPage() {
                 ...(deletingTopic ? styles.buttonDisabled : {})
               }}
             >
-              {deletingTopic ? '⏳ Deleting...' : '🗑️ Delete Topic'}
+              {deletingTopic ? 'Deleting...' : 'Delete Topic'}
             </button>
           </div>
         </div>
 
-        {/* Topic Materials Section */}
         <div style={styles.materialsCard}>
-          <h2 style={styles.sectionTitle}>📚 Topic Materials (Shared PDFs)</h2>
-          <p style={styles.materialsSubtitle}>
-            PDFs uploaded here are shared across all lectures in this topic
-          </p>
-          
-          {/* Upload PDF */}
-          <div style={styles.uploadSection}>
-            <input
-              type="file"
-              accept=".pdf"
-              onChange={(e) => setPdfFile(e.target.files[0])}
-              style={styles.fileInput}
-            />
-            
-            {pdfFile && (
-              <p style={styles.fileInfo}>
-                Selected: {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
+          <div style={styles.materialsHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Topic Materials (Shared PDFs)</h2>
+              <p style={styles.materialsSubtitle}>
+                PDFs uploaded here are shared across all lectures in this topic
               </p>
-            )}
-            
+            </div>
             <button
-              onClick={handlePdfUpload}
-              disabled={!pdfFile || uploadingPdf}
-              style={{
-                ...styles.uploadButton,
-                ...((!pdfFile || uploadingPdf) && styles.uploadButtonDisabled)
-              }}
+              onClick={() => setShowPdfUploader(!showPdfUploader)}
+              style={styles.addPdfButton}
             >
-              {uploadingPdf ? '⏳ Uploading...' : '📤 Upload PDF to Topic'}
+              {showPdfUploader ? 'Cancel' : 'Add PDF'}
             </button>
           </div>
+          
+          {showPdfUploader && (
+            <PdfUploader
+              targetType="topic"
+              targetId={topicId}
+              onUploadComplete={handlePdfUploadComplete}
+            />
+          )}
 
-          {/* Materials List */}
           {materials.length > 0 && (
             <div style={styles.materialsList}>
               {materials.map((material) => (
                 <div key={material.id} style={styles.materialItem}>
-                  <span style={styles.materialIcon}>📄</span>
-                  <span style={styles.materialName}>{material.file_name}</span>
+                  <div style={styles.materialInfo}>
+                    <span style={styles.materialName}>{material.file_name}</span>
+                    {material.page_count && material.total_pages && (
+                      <span style={styles.pageInfo}>
+                        {material.page_count} of {material.total_pages} pages
+                      </span>
+                    )}
+                  </div>
                   <span style={styles.materialDate}>
                     {formatDate(material.created_at)}
                   </span>
@@ -320,22 +287,22 @@ export default function TopicDetailPage() {
                       ...(deletingMaterialId === material.id ? styles.buttonDisabled : {})
                     }}
                   >
-                    {deletingMaterialId === material.id ? '⏳' : '🗑️'}
+                    {deletingMaterialId === material.id ? '...' : 'Delete'}
                   </button>
                 </div>
               ))}
             </div>
           )}
 
-          {materials.length === 0 && (
-            <p style={styles.noMaterials}>No shared materials yet. Upload a PDF that applies to all lectures in this topic.</p>
+          {materials.length === 0 && !showPdfUploader && (
+            <p style={styles.noMaterials}>No shared materials yet. Click "Add PDF" to upload.</p>
           )}
         </div>
 
         {quiz && (
           <div style={styles.quizCard}>
             <div style={styles.quizHeader}>
-              <h2 style={styles.quizTitle}>📋 Topic Quiz ({lectures.length} lectures)</h2>
+              <h2 style={styles.quizTitle}>Topic Quiz ({lectures.length} lectures)</h2>
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(quiz);
@@ -343,7 +310,7 @@ export default function TopicDetailPage() {
                 }}
                 style={styles.copyButton}
               >
-                📋 Copy Quiz
+                Copy Quiz
               </button>
             </div>
             <pre style={styles.quizContent}>{quiz}</pre>
@@ -356,7 +323,7 @@ export default function TopicDetailPage() {
           <div style={styles.empty}>
             <p>No lectures in this topic yet.</p>
             <Link href="/" style={styles.uploadLink}>
-              🚀 Upload Lecture
+              Upload Lecture
             </Link>
           </div>
         )}
@@ -373,15 +340,15 @@ export default function TopicDetailPage() {
                 
                 <div style={styles.lectureInfo}>
                   <span style={styles.infoItem}>
-                    ⏱️ {formatDuration(lecture.audio_duration_seconds)}
+                    {formatDuration(lecture.audio_duration_seconds)}
                   </span>
                   <span style={styles.infoItem}>
-                    📅 {formatDate(lecture.created_at)}
+                    {formatDate(lecture.created_at)}
                   </span>
                 </div>
 
                 <div style={styles.viewButton}>
-                  View Lecture →
+                  View Lecture
                 </div>
               </Link>
 
@@ -393,7 +360,7 @@ export default function TopicDetailPage() {
                   ...(deletingLectureId === lecture.id ? styles.buttonDisabled : {})
                 }}
               >
-                {deletingLectureId === lecture.id ? '⏳' : '🗑️'}
+                {deletingLectureId === lecture.id ? '...' : 'X'}
               </button>
             </div>
           ))}
@@ -490,6 +457,14 @@ const styles = {
     marginBottom: '20px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
   },
+  materialsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '20px',
+    gap: '15px',
+    flexWrap: 'wrap',
+  },
   sectionTitle: {
     fontSize: '20px',
     fontWeight: '600',
@@ -499,25 +474,11 @@ const styles = {
   materialsSubtitle: {
     fontSize: '14px',
     color: '#666',
-    marginBottom: '20px',
+    margin: 0,
   },
-  uploadSection: {
-    padding: '20px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '4px',
-    marginBottom: '20px',
-  },
-  fileInput: {
-    marginBottom: '10px',
-  },
-  fileInfo: {
-    fontSize: '14px',
-    color: '#666',
-    marginBottom: '10px',
-  },
-  uploadButton: {
+  addPdfButton: {
     padding: '10px 20px',
-    backgroundColor: '#17a2b8',
+    backgroundColor: '#28a745',
     color: 'white',
     border: 'none',
     borderRadius: '4px',
@@ -525,36 +486,39 @@ const styles = {
     fontSize: '14px',
     fontWeight: '600',
   },
-  uploadButtonDisabled: {
-    backgroundColor: '#ccc',
-    cursor: 'not-allowed',
-  },
   materialsList: {
     marginTop: '15px',
   },
   materialItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    gap: '12px',
     padding: '12px',
     backgroundColor: '#f9f9f9',
     borderRadius: '4px',
     marginBottom: '10px',
   },
-  materialIcon: {
-    fontSize: '20px',
+  materialInfo: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   materialName: {
-    flex: 1,
     fontSize: '14px',
     color: '#333',
+    fontWeight: '500',
+  },
+  pageInfo: {
+    fontSize: '12px',
+    color: '#28a745',
   },
   materialDate: {
     fontSize: '12px',
     color: '#666',
   },
   deleteMaterialButton: {
-    padding: '6px 10px',
+    padding: '6px 12px',
     backgroundColor: '#dc3545',
     color: 'white',
     border: 'none',
@@ -641,10 +605,8 @@ const styles = {
     textDecoration: 'none',
     color: 'inherit',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    transition: 'transform 0.2s, box-shadow 0.2s',
     cursor: 'pointer',
     display: 'block',
-    position: 'relative',
   },
   lectureNumber: {
     position: 'absolute',

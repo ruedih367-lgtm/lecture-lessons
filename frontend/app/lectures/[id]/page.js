@@ -1,4 +1,4 @@
-//frontend/app/lectures/[id]/page.js
+// frontend/app/lectures/[id]/page.js
 
 'use client';
 
@@ -6,6 +6,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { getApiUrl } from '../../context/AuthContext';
+import PdfUploader from '../../components/PdfUploader';
+import MarkdownRenderer from '../../components/MarkdownRenderer';
 
 const API_URL = getApiUrl();
 
@@ -17,11 +19,10 @@ export default function LecturePage() {
   const [lecture, setLecture] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [viewMode, setViewMode] = useState('cleaned'); // 'cleaned', 'raw', or 'summary'
+  const [viewMode, setViewMode] = useState('cleaned');
   const [materials, setMaterials] = useState([]);
-  const [uploadingPdf, setUploadingPdf] = useState(false);
-  const [pdfFile, setPdfFile] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [showPdfUploader, setShowPdfUploader] = useState(false);
 
   useEffect(() => {
     if (lectureId) {
@@ -34,7 +35,6 @@ export default function LecturePage() {
     try {
       const response = await fetch(`${API_URL}/lectures/${lectureId}`);
       if (!response.ok) throw new Error('Lecture not found');
-      
       const data = await response.json();
       setLecture(data);
     } catch (err) {
@@ -48,7 +48,6 @@ export default function LecturePage() {
     try {
       const response = await fetch(`${API_URL}/lectures/${lectureId}/materials`);
       if (!response.ok) throw new Error('Failed to fetch materials');
-      
       const data = await response.json();
       setMaterials(data);
     } catch (err) {
@@ -56,35 +55,9 @@ export default function LecturePage() {
     }
   };
 
-  const handlePdfUpload = async () => {
-    if (!pdfFile) return;
-
-    setUploadingPdf(true);
-    
-    const formData = new FormData();
-    formData.append('pdf', pdfFile);
-
-    try {
-      const response = await fetch(`${API_URL}/lectures/${lectureId}/upload-pdf`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('PDF upload failed');
-      }
-
-      const data = await response.json();
-      alert(`PDF uploaded! Extracted ${data.pages} pages.`);
-      
-      fetchMaterials();
-      setPdfFile(null);
-      
-    } catch (err) {
-      alert(`Upload failed: ${err.message}`);
-    } finally {
-      setUploadingPdf(false);
-    }
+  const handlePdfUploadComplete = (data) => {
+    fetchMaterials();
+    setShowPdfUploader(false);
   };
 
   const handleDeleteLecture = async () => {
@@ -105,7 +78,6 @@ export default function LecturePage() {
 
       alert('Lecture deleted successfully!');
       router.push('/lectures');
-      
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
       setDeleting(false);
@@ -180,14 +152,12 @@ export default function LecturePage() {
   return (
     <div style={styles.container}>
       <div style={styles.content}>
-        {/* Header */}
         <div style={styles.header}>
           <Link href="/lectures" style={styles.backLink}>
             All Lectures
           </Link>
         </div>
 
-        {/* Lecture Info Card */}
         <div style={styles.infoCard}>
           <h1 style={styles.title}>{lecture.title}</h1>
           
@@ -203,12 +173,11 @@ export default function LecturePage() {
             </span>
             {lecture.summary && (
               <span style={styles.metaItem}>
-                📝 Summary available
+                Summary available
               </span>
             )}
           </div>
 
-          {/* ACTIONS */}
           <div style={styles.actions}>
             <Link href={`/lectures/${lectureId}/study`} style={styles.studyButton}>
               AI Study Assistant
@@ -238,7 +207,6 @@ export default function LecturePage() {
           </div>
         </div>
 
-        {/* View Mode Toggle */}
         <div style={styles.viewToggle}>
           <button
             onClick={() => setViewMode('cleaned')}
@@ -247,7 +215,7 @@ export default function LecturePage() {
               ...(viewMode === 'cleaned' ? styles.toggleButtonActive : {})
             }}
           >
-            📄 Cleaned Transcript
+            Cleaned Transcript
           </button>
           <button
             onClick={() => setViewMode('summary')}
@@ -257,9 +225,8 @@ export default function LecturePage() {
               ...(!lecture.summary ? styles.toggleButtonDisabled : {})
             }}
             disabled={!lecture.summary}
-            title={!lecture.summary ? 'No summary available' : 'View summary'}
           >
-            📝 Summary
+            Summary
           </button>
           <button
             onClick={() => setViewMode('raw')}
@@ -268,48 +235,41 @@ export default function LecturePage() {
               ...(viewMode === 'raw' ? styles.toggleButtonActive : {})
             }}
           >
-            📋 Raw Transcript
+            Raw Transcript
           </button>
         </div>
 
-        {/* Materials Section */}
         <div style={styles.materialsCard}>
-          <h2 style={styles.sectionTitle}>Course Materials</h2>
-          
-          {/* Upload PDF */}
-          <div style={styles.uploadSection}>
-            <input
-              type="file"
-              accept=".pdf"
-              onChange={(e) => setPdfFile(e.target.files[0])}
-              style={styles.fileInput}
-            />
-            
-            {pdfFile && (
-              <p style={styles.fileInfo}>
-                Selected: {pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)
-              </p>
-            )}
-            
+          <div style={styles.materialsHeader}>
+            <h2 style={styles.sectionTitle}>Course Materials</h2>
             <button
-              onClick={handlePdfUpload}
-              disabled={!pdfFile || uploadingPdf}
-              style={{
-                ...styles.uploadButton,
-                ...((!pdfFile || uploadingPdf) && styles.uploadButtonDisabled)
-              }}
+              onClick={() => setShowPdfUploader(!showPdfUploader)}
+              style={styles.addPdfButton}
             >
-              {uploadingPdf ? 'Uploading...' : 'Upload PDF'}
+              {showPdfUploader ? 'Cancel' : 'Add PDF'}
             </button>
           </div>
+          
+          {showPdfUploader && (
+            <PdfUploader
+              targetType="lecture"
+              targetId={lectureId}
+              onUploadComplete={handlePdfUploadComplete}
+            />
+          )}
 
-          {/* Materials List */}
           {materials.length > 0 && (
             <div style={styles.materialsList}>
-              <h3 style={styles.materialsListTitle}>Uploaded Materials:</h3>
               {materials.map((material) => (
                 <div key={material.id} style={styles.materialItem}>
-                  <span style={styles.materialName}>{material.file_name}</span>
+                  <div style={styles.materialInfo}>
+                    <span style={styles.materialName}>{material.file_name}</span>
+                    {material.page_count && material.total_pages && (
+                      <span style={styles.pageInfo}>
+                        {material.page_count} of {material.total_pages} pages
+                      </span>
+                    )}
+                  </div>
                   <span style={styles.materialDate}>
                     {new Date(material.created_at).toLocaleDateString()}
                   </span>
@@ -318,25 +278,23 @@ export default function LecturePage() {
             </div>
           )}
 
-          {materials.length === 0 && (
+          {materials.length === 0 && !showPdfUploader && (
             <p style={styles.noMaterials}>No materials uploaded yet.</p>
           )}
         </div>
 
-        {/* Transcript/Summary Display */}
         <div style={styles.transcriptCard}>
           <h2 style={styles.transcriptTitle}>
             {getContentLabel()}
-            {viewMode === 'summary' && (
+            {viewMode === 'summary' && lecture.summary && (
               <span style={styles.summaryBadge}>
-                {lecture.summary?.length || 0} chars (
-                {Math.round((lecture.summary?.length || 0) / (lecture.cleaned_transcript?.length || 1) * 100)}% of full)
+                {lecture.summary?.length || 0} chars ({Math.round((lecture.summary?.length || 0) / (lecture.cleaned_transcript?.length || 1) * 100)}% of full)
               </span>
             )}
           </h2>
           
           <div style={styles.transcript}>
-            {getDisplayedContent()}
+            <MarkdownRenderer content={getDisplayedContent()} />
           </div>
         </div>
       </div>
@@ -455,7 +413,6 @@ const styles = {
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
-    transition: 'all 0.2s',
   },
   toggleButtonActive: {
     backgroundColor: '#0066cc',
@@ -466,6 +423,72 @@ const styles = {
     backgroundColor: '#f5f5f5',
     color: '#999',
     cursor: 'not-allowed',
+  },
+  materialsCard: {
+    backgroundColor: 'white',
+    padding: '30px',
+    borderRadius: '8px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  },
+  materialsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+  },
+  sectionTitle: {
+    fontSize: '20px',
+    fontWeight: '600',
+    color: '#333',
+    margin: 0,
+  },
+  addPdfButton: {
+    padding: '8px 16px',
+    backgroundColor: '#28a745',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+  },
+  materialsList: {
+    marginTop: '20px',
+  },
+  materialItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px',
+    backgroundColor: '#f9f9f9',
+    borderRadius: '4px',
+    marginBottom: '10px',
+  },
+  materialInfo: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  materialName: {
+    fontSize: '14px',
+    color: '#333',
+    fontWeight: '500',
+  },
+  pageInfo: {
+    fontSize: '12px',
+    color: '#28a745',
+  },
+  materialDate: {
+    fontSize: '12px',
+    color: '#666',
+  },
+  noMaterials: {
+    color: '#666',
+    fontStyle: 'italic',
+    padding: '20px',
+    textAlign: 'center',
   },
   transcriptCard: {
     backgroundColor: 'white',
@@ -497,80 +520,5 @@ const styles = {
     fontSize: '16px',
     color: '#333',
     whiteSpace: 'pre-wrap',
-    wordWrap: 'break-word',
-  },
-  materialsCard: {
-    backgroundColor: 'white',
-    padding: '30px',
-    borderRadius: '8px',
-    marginBottom: '20px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-  },
-  sectionTitle: {
-    fontSize: '20px',
-    fontWeight: '600',
-    marginBottom: '20px',
-    color: '#333',
-  },
-  uploadSection: {
-    padding: '20px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '4px',
-    marginBottom: '20px',
-  },
-  fileInput: {
-    marginBottom: '10px',
-  },
-  fileInfo: {
-    fontSize: '14px',
-    color: '#666',
-    marginBottom: '10px',
-  },
-  uploadButton: {
-    padding: '10px 20px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600',
-  },
-  uploadButtonDisabled: {
-    backgroundColor: '#ccc',
-    cursor: 'not-allowed',
-  },
-  materialsList: {
-    marginTop: '20px',
-  },
-  materialsListTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    marginBottom: '15px',
-    color: '#333',
-  },
-  materialItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '12px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '4px',
-    marginBottom: '10px',
-  },
-  materialName: {
-    flex: 1,
-    fontSize: '14px',
-    color: '#333',
-  },
-  materialDate: {
-    fontSize: '12px',
-    color: '#666',
-  },
-  noMaterials: {
-    color: '#666',
-    fontStyle: 'italic',
-    padding: '20px',
-    textAlign: 'center',
   },
 };

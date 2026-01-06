@@ -1297,8 +1297,10 @@ def generate_summary_with_groq(transcript: str, title: str) -> str:
     prompt = f"""Create a thorough summary of this lecture transcript for study purposes.
 
 GUIDELINES:
+- Write the summary in THE SAME LANGUAGE as the transcript
 - Adapt length to content density - include everything important
 - Preserve ALL key concepts, definitions, and terminology
+- Use **bold** for key terms and important concepts
 - Keep important examples that illustrate concepts
 - Maintain formulas, equations, or technical details exactly
 - Include any lists, steps, or processes mentioned
@@ -1311,6 +1313,7 @@ DO NOT:
 - Oversimplify complex concepts
 - Skip examples that help understanding
 - Use generic filler phrases
+- Translate to a different language
 
 The summary should be detailed enough that a student could study from it
 without missing critical information, but shorter than the full transcript.
@@ -1332,32 +1335,63 @@ SUMMARY:"""
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Summary generation error: {e}")
-        # Return a truncated version as fallback
         return transcript[:3000] + "\n\n[Summary generation failed - truncated transcript]"
 
 
-
 @app.post("/lectures/{lecture_id}/upload-pdf")
-async def upload_pdf(lecture_id: str, pdf: UploadFile = File(...)):
-    """Upload PDF to lecture"""
+async def upload_pdf(
+    lecture_id: str, 
+    pdf: UploadFile = File(...),
+    selected_pages: str = Form("")
+):
+    """Upload PDF to lecture with optional page selection"""
     if not pdf.filename.lower().endswith('.pdf'):
         raise HTTPException(400, "Must be PDF")
     
-    pdf_content = await pdf.read()
-    pdf_reader = PdfReader(io.BytesIO(pdf_content))
-    
-    extracted_text = ""
-    for i, page in enumerate(pdf_reader.pages):
-        extracted_text += f"\n--- Page {i+1} ---\n{page.extract_text()}"
-    
-    result = supabase.table('materials').insert({
-        'lecture_id': lecture_id,
-        'file_name': pdf.filename,
-        'file_type': 'pdf',
-        'extracted_text': extracted_text
-    }).execute()
-    
-    return {'material_id': result.data[0]['id'], 'pages': len(pdf_reader.pages), 'status': 'success'}
+    try:
+        pdf_content = await pdf.read()
+        pdf_reader = PdfReader(io.BytesIO(pdf_content))
+        total_pages = len(pdf_reader.pages)
+        
+        # Parse selected pages
+        if selected_pages and selected_pages.strip():
+            try:
+                page_numbers = [int(p.strip()) for p in selected_pages.split(',') if p.strip()]
+                page_numbers = [p for p in page_numbers if 1 <= p <= total_pages]
+            except ValueError:
+                page_numbers = list(range(1, total_pages + 1))
+        else:
+            page_numbers = list(range(1, total_pages + 1))
+        
+        # Extract only selected pages
+        extracted_text = ""
+        for page_num in sorted(page_numbers):
+            page = pdf_reader.pages[page_num - 1]
+            page_text = page.extract_text() or ""
+            extracted_text += f"\n--- Page {page_num} ---\n{page_text}"
+        
+        result = supabase.table('materials').insert({
+            'lecture_id': lecture_id,
+            'file_name': pdf.filename,
+            'file_type': 'pdf',
+            'extracted_text': extracted_text,
+            'page_count': len(page_numbers),
+            'total_pages': total_pages,
+            'selected_pages': ','.join(map(str, page_numbers))
+        }).execute()
+        
+        return {
+            'material_id': result.data[0]['id'],
+            'pages_used': len(page_numbers),
+            'total_pages': total_pages,
+            'selected_pages': page_numbers,
+            'characters': len(extracted_text),
+            'status': 'success'
+        }
+    except Exception as e:
+        raise HTTPException(500, f"PDF upload failed: {str(e)}")
+
+
 
 
 @app.get("/lectures/{lecture_id}/materials")
@@ -1381,8 +1415,12 @@ async def assign_lecture_to_topic(lecture_id: str, topic_id: str = Form(...)):
 # ============================================
 
 @app.post("/topics/{topic_id}/upload-pdf")
-async def upload_topic_pdf(topic_id: str, pdf: UploadFile = File(...)):
-    """Upload PDF to a topic (shared across all lectures in topic)"""
+async def upload_topic_pdf(
+    topic_id: str, 
+    pdf: UploadFile = File(...),
+    selected_pages: str = Form("")
+):
+    """Upload PDF to a topic with optional page selection"""
     if not pdf.filename.lower().endswith('.pdf'):
         raise HTTPException(400, "Must be PDF")
     
@@ -1391,26 +1429,49 @@ async def upload_topic_pdf(topic_id: str, pdf: UploadFile = File(...)):
     if not topic.data:
         raise HTTPException(404, "Topic not found")
     
-    pdf_content = await pdf.read()
-    pdf_reader = PdfReader(io.BytesIO(pdf_content))
-    
-    extracted_text = ""
-    for i, page in enumerate(pdf_reader.pages):
-        extracted_text += f"\n--- Page {i+1} ---\n{page.extract_text()}"
-    
-    result = supabase.table('materials').insert({
-        'topic_id': topic_id,
-        'file_name': pdf.filename,
-        'file_type': 'pdf',
-        'extracted_text': extracted_text
-    }).execute()
-    
-    return {
-        'material_id': result.data[0]['id'],
-        'pages': len(pdf_reader.pages),
-        'characters': len(extracted_text),
-        'status': 'success'
-    }
+    try:
+        pdf_content = await pdf.read()
+        pdf_reader = PdfReader(io.BytesIO(pdf_content))
+        total_pages = len(pdf_reader.pages)
+        
+        # Parse selected pages
+        if selected_pages and selected_pages.strip():
+            try:
+                page_numbers = [int(p.strip()) for p in selected_pages.split(',') if p.strip()]
+                page_numbers = [p for p in page_numbers if 1 <= p <= total_pages]
+            except ValueError:
+                page_numbers = list(range(1, total_pages + 1))
+        else:
+            page_numbers = list(range(1, total_pages + 1))
+        
+        # Extract only selected pages
+        extracted_text = ""
+        for page_num in sorted(page_numbers):
+            page = pdf_reader.pages[page_num - 1]
+            page_text = page.extract_text() or ""
+            extracted_text += f"\n--- Page {page_num} ---\n{page_text}"
+        
+        result = supabase.table('materials').insert({
+            'topic_id': topic_id,
+            'file_name': pdf.filename,
+            'file_type': 'pdf',
+            'extracted_text': extracted_text,
+            'page_count': len(page_numbers),
+            'total_pages': total_pages,
+            'selected_pages': ','.join(map(str, page_numbers))
+        }).execute()
+        
+        return {
+            'material_id': result.data[0]['id'],
+            'pages_used': len(page_numbers),
+            'total_pages': total_pages,
+            'selected_pages': page_numbers,
+            'characters': len(extracted_text),
+            'status': 'success'
+        }
+    except Exception as e:
+        raise HTTPException(500, f"PDF upload failed: {str(e)}")
+
 
 
 @app.get("/topics/{topic_id}/materials")
@@ -1872,3 +1933,36 @@ async def root():
 async def health_check():
     """Health check endpoint for deployment platforms"""
     return {"status": "healthy"}
+
+
+@app.post("/pdf/preview")
+async def preview_pdf(pdf: UploadFile = File(...)):
+    """Preview PDF - returns page count and first few lines of each page for selection"""
+    if not pdf.filename.lower().endswith('.pdf'):
+        raise HTTPException(400, "Must be PDF")
+    
+    try:
+        pdf_content = await pdf.read()
+        pdf_reader = PdfReader(io.BytesIO(pdf_content))
+        
+        pages_preview = []
+        for i, page in enumerate(pdf_reader.pages):
+            text = page.extract_text() or ""
+            # Get first 200 chars as preview
+            preview = text[:200].strip().replace('\n', ' ')
+            if len(text) > 200:
+                preview += "..."
+            
+            pages_preview.append({
+                'page_number': i + 1,
+                'preview': preview,
+                'char_count': len(text)
+            })
+        
+        return {
+            'filename': pdf.filename,
+            'total_pages': len(pdf_reader.pages),
+            'pages': pages_preview
+        }
+    except Exception as e:
+        raise HTTPException(400, f"Failed to read PDF: {str(e)}")
